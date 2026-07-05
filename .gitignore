@@ -1,6 +1,5 @@
 # ====== Go 后端 ======
 # 编译产物
-*.exe
 *.exe~
 *.dll
 *.so
@@ -53,9 +52,10 @@ pnpm-debug.log*
 *.sln
 *.sw?
 
-
 # ====== Rust / Demo ======
 demo/Cargo.lock.bak
+demo/target
+!demo/target/release/iupdater-demo.exe
 
 # Rust 分析器
 .vscode/*
