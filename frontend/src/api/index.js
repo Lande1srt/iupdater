@@ -4,6 +4,10 @@ export function login(data) {
   return request.post('/login', data)
 }
 
+export function getLoginConfig() {
+  return request.get('/login/config')
+}
+
 export function getApps(params) {
   return request.get('/admin/apps', { params })
 }

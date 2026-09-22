@@ -20,6 +20,7 @@ func SetupRoutes(r *gin.Engine) {
 
 	api := r.Group("/api")
 	{
+		api.GET("/login/config", handlers.GetLoginConfig)
 		api.POST("/login", handlers.Login)
 		api.POST("/check-update", handlers.CheckUpdate)
 		api.GET("/download/*filekey", handlers.ProxyDownload)
