@@ -14,6 +14,10 @@ import (
 func SetupRoutes(r *gin.Engine) {
 	r.Static("/uploads", "./data/uploads")
 
+	// 公开版本查询（无需认证）
+	r.GET("/u/:appid", handlers.GetLatestVersion)
+	r.GET("/u/getlink/:appid", handlers.GetLatestLink)
+
 	api := r.Group("/api")
 	{
 		api.POST("/login", handlers.Login)
@@ -23,6 +27,14 @@ func SetupRoutes(r *gin.Engine) {
 		admin := api.Group("/admin")
 		admin.Use(middleware.AuthMiddleware())
 		{
+			// 存储配置档案管理（侧边栏存储管理）
+			admin.GET("/storage-profiles", handlers.GetStorageProfiles)
+			admin.GET("/storage-profiles/:id", handlers.GetStorageProfile)
+			admin.POST("/storage-profiles", handlers.CreateStorageProfile)
+			admin.PUT("/storage-profiles/:id", handlers.UpdateStorageProfile)
+			admin.DELETE("/storage-profiles/:id", handlers.DeleteStorageProfile)
+			admin.POST("/storage-profiles/:id/check", handlers.CheckStorageProfileConnection)
+
 			admin.GET("/apps", handlers.GetApps)
 			admin.GET("/apps/:id", handlers.GetApp)
 			admin.POST("/apps", handlers.CreateApp)
@@ -43,6 +55,8 @@ func SetupRoutes(r *gin.Engine) {
 			admin.POST("/components/upload", handlers.UploadComponentFile)
 			admin.PUT("/components/:id/status", handlers.UpdateComponentStatus)
 			admin.DELETE("/components/:id", handlers.DeleteComponent)
+
+			admin.POST("/storage/check", handlers.CheckStorageConnection)
 		}
 	}
 

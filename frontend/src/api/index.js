@@ -24,6 +24,10 @@ export function deleteApp(id) {
   return request.delete(`/admin/apps/${id}`)
 }
 
+export function checkStorageConnection(data) {
+  return request.post('/admin/storage/check', data)
+}
+
 export function getVersions(params) {
   return request.get('/admin/versions', { params })
 }
@@ -36,9 +40,11 @@ export function createVersion(data) {
   return request.post('/admin/versions', data)
 }
 
-export function uploadVersionFile(formData) {
+export function uploadVersionFile(formData, onProgress) {
   return request.post('/admin/versions/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000,
+    onUploadProgress: onProgress
   })
 }
 
@@ -66,9 +72,11 @@ export function createComponent(data) {
   return request.post('/admin/components', data)
 }
 
-export function uploadComponentFile(formData) {
+export function uploadComponentFile(formData, onProgress) {
   return request.post('/admin/components/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' }
+    headers: { 'Content-Type': 'multipart/form-data' },
+    timeout: 300000,
+    onUploadProgress: onProgress
   })
 }
 
@@ -78,4 +86,29 @@ export function updateComponentStatus(id, status) {
 
 export function deleteComponent(id) {
   return request.delete(`/admin/components/${id}`)
+}
+
+// ============ 存储配置档案 ============
+export function getStorageProfiles(params) {
+  return request.get('/admin/storage-profiles', { params })
+}
+
+export function getStorageProfile(id) {
+  return request.get(`/admin/storage-profiles/${id}`)
+}
+
+export function createStorageProfile(data) {
+  return request.post('/admin/storage-profiles', data)
+}
+
+export function updateStorageProfile(id, data) {
+  return request.put(`/admin/storage-profiles/${id}`, data)
+}
+
+export function deleteStorageProfile(id) {
+  return request.delete(`/admin/storage-profiles/${id}`)
+}
+
+export function checkStorageProfileConnection(id) {
+  return request.post(`/admin/storage-profiles/${id}/check`)
 }

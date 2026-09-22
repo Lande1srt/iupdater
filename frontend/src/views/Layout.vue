@@ -22,6 +22,17 @@
           </svg>
           <span class="font-medium">应用管理</span>
         </router-link>
+
+        <router-link
+          to="/storage"
+          class="flex items-center gap-3 px-4 py-3 rounded-lg mb-1 transition-colors"
+          :class="isActive('/storage') ? 'bg-primary-50 text-primary-600' : 'text-gray-600 hover:bg-gray-50'"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 7v10m0 0a2 2 0 002 2h12a2 2 0 002-2V7m-16 0a2 2 0 012-2h12a2 2 0 012 2m0 0a2 2 0 01-2 2H6a2 2 0 01-2-2" />
+          </svg>
+          <span class="font-medium">存储管理</span>
+        </router-link>
       </nav>
 
       <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-100">

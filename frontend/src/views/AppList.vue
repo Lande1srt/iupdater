@@ -1,11 +1,11 @@
-<template>
+﻿<template>
   <div>
     <div class="flex items-center justify-between mb-6">
       <div>
         <h2 class="text-2xl font-bold text-gray-800">应用管理</h2>
         <p class="text-gray-500 mt-1">管理所有应用及其版本更新</p>
       </div>
-      <button @click="showCreateModal = true" class="btn btn-primary">
+      <button @click="openCreate" class="btn btn-primary">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4" />
         </svg>
@@ -17,7 +17,7 @@
       <div class="card-body">
         <div class="flex gap-4">
           <div class="flex-1">
-            <input v-model="keyword" type="text" class="input" placeholder="搜索应用名称或App ID" @keyup.enter="loadApps" />
+            <input v-model="keyword" type="text" class="input" placeholder="搜索应用名称或 App ID" @keyup.enter="loadApps" />
           </div>
           <button @click="loadApps" class="btn btn-secondary">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -36,7 +36,7 @@
             <th>ID</th>
             <th>App ID</th>
             <th>应用名称</th>
-            <th>存储类型</th>
+            <th>存储档案</th>
             <th>访问校验</th>
             <th>创建时间</th>
             <th>操作</th>
@@ -45,19 +45,15 @@
         <tbody>
           <tr v-for="app in apps" :key="app.id">
             <td class="text-gray-500">{{ app.id }}</td>
-            <td>
-              <code class="bg-gray-100 px-2 py-1 rounded text-sm text-primary-600">{{ app.app_id }}</code>
-            </td>
+            <td><code class="bg-gray-100 px-2 py-1 rounded text-sm text-primary-600">{{ app.app_id }}</code></td>
             <td class="font-medium">{{ app.name }}</td>
             <td>
-              <span class="badge" :class="getStorageBadgeClass(app.storage_type)">
-                {{ getStorageTypeLabel(app.storage_type) }}
-              </span>
+              <span v-if="app.storage_profile" class="badge badge-info">{{ app.storage_profile.name }}</span>
+              <span v-else class="badge badge-secondary">元数据</span>
+              <span v-if="app.storage_path" class="text-xs text-gray-500 ml-1">/{{ app.storage_path }}</span>
             </td>
             <td>
-              <span v-if="app.enable_auth" class="badge badge-success" :title="'AccessKey: ' + app.access_key">
-                已启用
-              </span>
+              <span v-if="app.enable_auth" class="badge badge-success" :title="'AccessKey: ' + app.access_key">已启用</span>
               <span v-else class="badge badge-secondary">未启用</span>
             </td>
             <td class="text-gray-500">{{ formatDate(app.created_at) }}</td>
@@ -72,155 +68,77 @@
             </td>
           </tr>
           <tr v-if="apps.length === 0">
-            <td colspan="7" class="text-center py-12 text-gray-400">
-              暂无应用数据
-            </td>
+            <td colspan="7" class="text-center py-12 text-gray-400">暂无应用数据</td>
           </tr>
         </tbody>
       </table>
     </div>
 
     <div v-if="total > pageSize" class="flex justify-center mt-6 gap-2">
-      <button @click="changePage(page - 1)" :disabled="page <= 1" class="btn btn-sm btn-secondary">
-        上一页
-      </button>
-      <span class="px-4 py-2 text-gray-600">
-        第 {{ page }} / {{ totalPages }} 页，共 {{ total }} 条
-      </span>
-      <button @click="changePage(page + 1)" :disabled="page >= totalPages" class="btn btn-sm btn-secondary">
-        下一页
-      </button>
+      <button @click="changePage(page - 1)" :disabled="page <= 1" class="btn btn-sm btn-secondary">上一页</button>
+      <span class="px-4 py-2 text-gray-600">第 {{ page }} / {{ totalPages }} 页，共 {{ total }} 条</span>
+      <button @click="changePage(page + 1)" :disabled="page >= totalPages" class="btn btn-sm btn-secondary">下一页</button>
     </div>
 
-    <div v-if="showCreateModal" class="modal-overlay" @click.self="showCreateModal = false">
-      <div class="modal-content">
-        <div class="modal-header">
-          <h3 class="text-lg font-semibold">{{ editingApp ? '编辑应用' : '新建应用' }}</h3>
-          <button @click="showCreateModal = false" class="text-gray-400 hover:text-gray-600">
-            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
-            </svg>
+    <!-- 新建/编辑弹窗 -->
+    <div v-if="showModal" class="fixed inset-0 bg-black/40 flex items-center justify-center z-50" @click.self="showModal = false">
+      <div class="bg-white rounded-lg shadow-xl w-[520px] max-h-[90vh] overflow-hidden flex flex-col">
+        <div class="p-5 border-b border-gray-200 flex items-center justify-between">
+          <h3 class="text-lg font-semibold">{{ editingId !== null ? '编辑应用' : '新建应用' }}</h3>
+          <button @click="showModal = false" class="text-gray-400 hover:text-gray-600">
+            <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" /></svg>
           </button>
         </div>
-        <div class="modal-body">
-          <div class="space-y-4">
-            <div>
-              <label class="label">App ID <span class="text-red-500">*</span></label>
-              <input v-model="form.app_id" type="text" class="input" :disabled="!!editingApp" placeholder="如：com.example.myapp" />
-              <p class="text-xs text-gray-500 mt-1">应用唯一识别码，创建后不可修改</p>
+        <div class="p-5 space-y-4 overflow-y-auto flex-1">
+          <div>
+            <label class="label">App ID <span class="text-red-500">*</span></label>
+            <input v-model="form.app_id" type="text" class="input" :disabled="editingId !== null" placeholder="如：com.example.myapp" />
+            <p class="text-xs text-gray-500 mt-1">应用唯一识别码，创建后不可修改</p>
+          </div>
+          <div>
+            <label class="label">应用名称 <span class="text-red-500">*</span></label>
+            <input v-model="form.name" type="text" class="input" placeholder="请输入应用名称" />
+          </div>
+          <div>
+            <label class="label">应用描述</label>
+            <textarea v-model="form.description" class="input" rows="2" placeholder="可选"></textarea>
+          </div>
+          <div>
+            <label class="label">图标 URL</label>
+            <input v-model="form.icon" type="text" class="input" placeholder="可选" />
+          </div>
+
+          <hr class="border-gray-200" />
+
+          <div>
+            <label class="label">存储档案 <span class="text-red-500">*</span></label>
+            <select v-model="form.storage_profile_id" class="input" :disabled="profiles.length === 0">
+              <option :value="null">元数据（仅填 URL，无实际存储）</option>
+              <option v-for="p in profiles" :key="p.id" :value="p.id">
+                {{ p.name }} ({{ storageTypeLabel(p.storage_type) }})
+              </option>
+            </select>
+            <p v-if="profiles.length === 0" class="text-xs text-orange-500 mt-1">
+              还没有存储档案，请先到 <router-link to="/storage" class="text-primary-600 hover:underline">存储管理</router-link> 创建
+            </p>
+          </div>
+          <div v-if="form.storage_profile_id !== null" class="bg-gray-50 p-3 rounded-lg">
+            <label class="label">自定义基础路径（可选）</label>
+            <input v-model="form.storage_path" type="text" class="input" placeholder="如 coldsea/app 或留空使用档案默认" />
+            <p class="text-xs text-gray-500 mt-1">覆盖档案的基础路径，多个 App 共用一个档案但存放到不同子目录</p>
+          </div>
+
+          <div class="bg-blue-50 p-4 rounded-lg">
+            <div class="flex items-center gap-2">
+              <input v-model="form.enable_auth" type="checkbox" id="enable_auth" class="w-4 h-4" />
+              <label for="enable_auth" class="text-sm font-medium text-gray-700">启用访问校验</label>
             </div>
-            <div>
-              <label class="label">应用名称 <span class="text-red-500">*</span></label>
-              <input v-model="form.name" type="text" class="input" placeholder="请输入应用名称" />
-            </div>
-            <div>
-              <label class="label">应用描述</label>
-              <textarea v-model="form.description" class="input" rows="3" placeholder="请输入应用描述"></textarea>
-            </div>
-            <div>
-              <label class="label">图标 URL</label>
-              <input v-model="form.icon" type="text" class="input" placeholder="请输入图标链接" />
-            </div>
-            
-            <div class="bg-blue-50 p-4 rounded-lg">
-              <div class="flex items-center gap-2">
-                <input v-model="form.enable_auth" type="checkbox" id="enable_auth" class="w-4 h-4" />
-                <label for="enable_auth" class="text-sm font-medium text-gray-700">启用访问校验</label>
-              </div>
-              <p class="text-xs text-gray-600 mt-2">启用后，客户端请求必须携带 AccessKey 才能访问更新接口</p>
-            </div>
-            
-            <div>
-              <label class="label">存储类型 <span class="text-red-500">*</span></label>
-              <select v-model="form.storage_type" class="input" @change="onStorageTypeChange">
-                <option value="metadata">元数据（本地存储）</option>
-                <option value="s3">S3 对象存储</option>
-                <option value="webdav">WebDAV</option>
-              </select>
-            </div>
-            
-            <!-- 元数据存储配置 -->
-            <div v-if="form.storage_type === 'metadata'" class="bg-gray-50 p-4 rounded-lg space-y-3">
-              <p class="text-sm text-gray-600">元数据模式：仅存储版本信息，发布时直接填写外部下载链接</p>
-            </div>
-            
-            <!-- S3 存储配置 -->
-            <div v-if="form.storage_type === 's3'" class="bg-gray-50 p-4 rounded-lg space-y-3">
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="label">Endpoint <span class="text-red-500">*</span></label>
-                  <input v-model="storageFields.s3.endpoint" type="text" class="input" placeholder="https://s3.example.com" />
-                </div>
-                <div>
-                  <label class="label">Region</label>
-                  <input v-model="storageFields.s3.region" type="text" class="input" placeholder="us-east-1" />
-                </div>
-              </div>
-              <div>
-                <label class="label">Bucket <span class="text-red-500">*</span></label>
-                <input v-model="storageFields.s3.bucket" type="text" class="input" placeholder="my-bucket" />
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="label">Access Key <span class="text-red-500">*</span></label>
-                  <input v-model="storageFields.s3.access_key" type="text" class="input" placeholder="your-access-key" />
-                </div>
-                <div>
-                  <label class="label">Secret Key <span class="text-red-500">*</span></label>
-                  <input v-model="storageFields.s3.secret_key" type="password" class="input" placeholder="your-secret-key" />
-                </div>
-              </div>
-              <div>
-                <label class="label">下载方式</label>
-                <div class="space-y-2">
-                  <label class="flex items-center">
-                    <input type="radio" :value="false" v-model="storageFields.s3.use_proxy" class="mr-2" />
-                    <span class="text-sm">外部CDN直连</span>
-                  </label>
-                  <label class="flex items-center">
-                    <input type="radio" :value="true" v-model="storageFields.s3.use_proxy" class="mr-2" />
-                    <span class="text-sm">系统代理转发</span>
-                  </label>
-                </div>
-              </div>
-              <div v-if="!storageFields.s3.use_proxy">
-                <label class="label">CDN 基础 URL</label>
-                <input v-model="storageFields.s3.base_url" type="text" class="input" placeholder="https://cdn.example.com" />
-                <p class="text-xs text-gray-500 mt-1">外部CDN地址，留空使用S3直连</p>
-              </div>
-              <div v-else class="bg-blue-50 p-3 rounded">
-                <p class="text-sm text-blue-800">✓ 下载请求将通过本系统代理转发</p>
-              </div>
-            </div>
-            
-            <!-- WebDAV 存储配置 -->
-            <div v-if="form.storage_type === 'webdav'" class="bg-gray-50 p-4 rounded-lg space-y-3">
-              <div>
-                <label class="label">WebDAV URL <span class="text-red-500">*</span></label>
-                <input v-model="storageFields.webdav.url" type="text" class="input" placeholder="https://dav.example.com" />
-              </div>
-              <div class="grid grid-cols-2 gap-3">
-                <div>
-                  <label class="label">用户名 <span class="text-red-500">*</span></label>
-                  <input v-model="storageFields.webdav.username" type="text" class="input" placeholder="username" />
-                </div>
-                <div>
-                  <label class="label">密码 <span class="text-red-500">*</span></label>
-                  <input v-model="storageFields.webdav.password" type="password" class="input" placeholder="password" />
-                </div>
-              </div>
-              <div>
-                <label class="label">基础路径</label>
-                <input v-model="storageFields.webdav.base_path" type="text" class="input" placeholder="/uploads" />
-              </div>
-            </div>
+            <p class="text-xs text-gray-600 mt-2">启用后，客户端请求必须携带 AccessKey 才能访问更新接口</p>
           </div>
         </div>
-        <div class="modal-footer">
-          <button @click="showCreateModal = false" class="btn btn-secondary">取消</button>
-          <button @click="saveApp" class="btn btn-primary" :disabled="saving">
-            {{ saving ? '保存中...' : '保存' }}
-          </button>
+        <div class="p-4 border-t border-gray-200 flex justify-end gap-2">
+          <button @click="showModal = false" class="btn btn-secondary">取消</button>
+          <button @click="saveApp" :disabled="saving" class="btn btn-primary">{{ saving ? '保存中...' : '保存' }}</button>
         </div>
       </div>
     </div>
@@ -230,228 +148,105 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { getApps, createApp, updateApp, deleteApp } from '../api'
+import { getApps, createApp, updateApp, deleteApp, getStorageProfiles } from '../api'
+import { success, error, info, confirm as askConfirm } from '../composables/useToast'
 
 const router = useRouter()
 
 const apps = ref([])
+const profiles = ref([])
 const total = ref(0)
 const page = ref(1)
 const pageSize = ref(20)
 const keyword = ref('')
-const showCreateModal = ref(false)
-const editingApp = ref(null)
+const showModal = ref(false)
+const editingId = ref(null)
 const saving = ref(false)
 
 const form = ref({
-  app_id: '',
-  name: '',
-  description: '',
-  icon: '',
-  storage_type: 'metadata',
-  storage_config: '',
+  app_id: '', name: '', description: '', icon: '',
+  storage_profile_id: null, storage_path: '',
   enable_auth: false
-})
-
-const storageFields = ref({
-  metadata: {
-    base_url: ''
-  },
-  s3: {
-    endpoint: '',
-    access_key: '',
-    secret_key: '',
-    bucket: '',
-    region: 'us-east-1',
-    base_url: '',
-    use_proxy: false
-  },
-  webdav: {
-    url: '',
-    username: '',
-    password: '',
-    base_path: '/uploads'
-  }
 })
 
 const totalPages = computed(() => Math.ceil(total.value / pageSize.value))
 
-function getStorageTypeLabel(type) {
-  const map = {
-    s3: 'S3 对象存储',
-    webdav: 'WebDAV',
-    metadata: '元数据（本地）'
-  }
-  return map[type] || type
+function storageTypeLabel(t) {
+  return { s3: 'S3', webdav: 'WebDAV', metadata: '元数据' }[t] || t
 }
 
-function getStorageBadgeClass(type) {
-  const map = {
-    s3: 'badge-info',
-    webdav: 'badge-warning',
-    metadata: 'badge-success'
-  }
-  return map[type] || 'badge-secondary'
-}
-
-function onStorageTypeChange() {
-  // 切换存储类型时重置对应配置
-  storageFields.value[form.value.storage_type] = getDefaultStorageFields(form.value.storage_type)
-}
-
-function getDefaultStorageFields(type) {
-  if (type === 's3') {
-    return { endpoint: '', access_key: '', secret_key: '', bucket: '', region: 'us-east-1', base_url: '' }
-  } else if (type === 'webdav') {
-    return { url: '', username: '', password: '', base_path: '/uploads' }
-  } else {
-    return { base_url: '' }
-  }
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return ''
-  const date = new Date(dateStr)
-  return date.toLocaleString('zh-CN')
+function formatDate(d) {
+  if (!d) return ''
+  return new Date(d).toLocaleString('zh-CN')
 }
 
 async function loadApps() {
   try {
-    const res = await getApps({
-      page: page.value,
-      page_size: pageSize.value,
-      keyword: keyword.value
-    })
-    apps.value = res.list
-    total.value = res.total
+    const res = await getApps({ page: page.value, page_size: pageSize.value, keyword: keyword.value })
+    apps.value = res.list || []
+    total.value = res.total || 0
   } catch (err) {
-    alert('加载失败：' + (err.response?.data?.error || err.message))
+    error('加载失败')
   }
 }
 
-function changePage(p) {
-  page.value = p
-  loadApps()
+async function loadProfiles() {
+  try {
+    const res = await getStorageProfiles({ page: 1, page_size: 100 })
+    profiles.value = res.list || []
+  } catch {}
+}
+
+function changePage(p) { page.value = p; loadApps() }
+
+function openCreate() {
+  editingId.value = null
+  form.value = { app_id: '', name: '', description: '', icon: '', storage_profile_id: null, storage_path: '', enable_auth: false }
+  showModal.value = true
 }
 
 function editApp(app) {
-  editingApp.value = app
+  editingId.value = app.id
   form.value = {
     app_id: app.app_id,
     name: app.name,
     description: app.description || '',
     icon: app.icon || '',
-    storage_type: app.storage_type,
-    storage_config: app.storage_config || '',
+    storage_profile_id: app.storage_profile_id,
+    storage_path: app.storage_path || '',
     enable_auth: app.enable_auth || false
   }
-  
-  // 解析 storage_config JSON 到表单字段
-  if (app.storage_config) {
-    try {
-      const config = JSON.parse(app.storage_config)
-      if (app.storage_type === 's3') {
-        storageFields.value.s3 = {
-          endpoint: config.endpoint || '',
-          access_key: config.access_key || '',
-          secret_key: config.secret_key || '',
-          bucket: config.bucket || '',
-          region: config.region || 'us-east-1',
-          base_url: config.base_url || ''
-        }
-      } else if (app.storage_type === 'webdav') {
-        storageFields.value.webdav = {
-          url: config.url || '',
-          username: config.username || '',
-          password: config.password || '',
-          base_path: config.base_path || '/uploads'
-        }
-      } else if (app.storage_type === 'metadata') {
-        storageFields.value.metadata = {
-          base_url: config.base_url || ''
-        }
-      }
-    } catch (e) {
-      console.error('Failed to parse storage_config:', e)
-    }
-  }
-  
-  showCreateModal.value = true
+  showModal.value = true
 }
 
 async function saveApp() {
-  if (!form.value.app_id || !form.value.name) {
-    alert('请填写 App ID 和应用名称')
-    return
-  }
-
-  // 将表单字段转换为 JSON 配置
-  const storageConfig = storageFields.value[form.value.storage_type]
-  form.value.storage_config = JSON.stringify(storageConfig)
-
+  if (!form.value.app_id || !form.value.name) { info('请填写 App ID 和应用名称'); return }
   saving.value = true
   try {
-    if (editingApp.value) {
-      await updateApp(editingApp.value.id, form.value)
+    if (editingId.value !== null) {
+      await updateApp(editingId.value, form.value)
+      success('更新成功')
     } else {
       await createApp(form.value)
+      success('创建成功')
     }
-    showCreateModal.value = false
-    resetForm()
+    showModal.value = false
     loadApps()
   } catch (err) {
-    alert('保存失败：' + (err.response?.data?.error || err.message))
+    error(err.response?.data?.error || '保存失败')
   } finally {
     saving.value = false
   }
 }
 
 async function deleteAppItem(app) {
-  if (!confirm(`确定要删除应用 "${app.name}" 吗？相关版本和组件也会被删除。`)) {
-    return
-  }
-
-  try {
-    await deleteApp(app.id)
-    loadApps()
-  } catch (err) {
-    alert('删除失败：' + (err.response?.data?.error || err.message))
-  }
+  if (!(await askConfirm(`确定要删除应用 "${app.name}" 吗？相关版本和组件也会被删除。`))) return
+  try { await deleteApp(app.id); success('删除成功'); loadApps() } catch { error('删除失败') }
 }
 
-function resetForm() {
-  editingApp.value = null
-  form.value = {
-    app_id: '',
-    name: '',
-    description: '',
-    icon: '',
-    storage_type: 'metadata',
-    storage_config: '',
-    enable_auth: false
-  }
-  
-  // 重置所有存储字段
-  storageFields.value = {
-    metadata: { base_url: '' },
-    s3: { endpoint: '', access_key: '', secret_key: '', bucket: '', region: 'us-east-1', base_url: '' },
-    webdav: { url: '', username: '', password: '', base_path: '/uploads' }
-  }
-}
+function goToInfo(a) { router.push(`/apps/${a.id}/info`) }
+function goToVersions(a) { router.push(`/apps/${a.id}/versions`) }
+function goToComponents(a) { router.push(`/apps/${a.id}/components`) }
 
-function goToInfo(app) {
-  router.push(`/apps/${app.id}/info`)
-}
-
-function goToVersions(app) {
-  router.push(`/apps/${app.id}/versions`)
-}
-
-function goToComponents(app) {
-  router.push(`/apps/${app.id}/components`)
-}
-
-onMounted(() => {
-  loadApps()
-})
+onMounted(() => { loadApps(); loadProfiles() })
 </script>

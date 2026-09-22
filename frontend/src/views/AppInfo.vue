@@ -43,11 +43,17 @@
               <p class="mt-1 text-gray-700 break-all">{{ app.icon || '暂未设置' }}</p>
             </div>
             <div>
-              <label class="text-sm font-medium text-gray-500">存储类型</label>
+              <label class="text-sm font-medium text-gray-500">存储档案</label>
               <p class="mt-1">
-                <span class="badge" :class="getStorageBadgeClass(app.storage_type)">
-                  {{ getStorageTypeLabel(app.storage_type) }}
-                </span>
+                <template v-if="app.storage_profile">
+                  <span class="badge" :class="storageProfileBadge(app.storage_profile.storage_type)">
+                    {{ app.storage_profile.name }}
+                  </span>
+                  <span v-if="app.storage_path" class="text-xs text-gray-500 ml-1">/{{ app.storage_path }}</span>
+                </template>
+                <template v-else>
+                  <span class="badge badge-secondary">元数据（无存储档案）</span>
+                </template>
               </p>
             </div>
             <div>
@@ -123,52 +129,76 @@
           <h3 class="text-lg font-semibold">存储配置</h3>
         </div>
         <div class="card-body">
-          <div v-if="storageConfig">
-            <div v-if="app.storage_type === 'metadata'" class="space-y-3">
+          <template v-if="app.storage_profile">
+            <div class="mb-4">
+              <div class="flex items-center gap-2 mb-2">
+                <span class="badge" :class="storageProfileBadge(app.storage_profile.storage_type)">{{ storageProfileLabel(app.storage_profile.storage_type) }}</span>
+                <span class="text-sm font-medium text-gray-700">{{ app.storage_profile.name }}</span>
+              </div>
+              <p v-if="app.storage_profile.description" class="text-sm text-gray-500">{{ app.storage_profile.description }}</p>
+            </div>
+
+            <!-- S3 -->
+            <div v-if="app.storage_profile.storage_type === 's3'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div>
-                <label class="text-sm font-medium text-gray-500">基础 URL</label>
-                <p class="mt-1 text-gray-700 break-all">{{ storageConfig.base_url || '未设置' }}</p>
+                <label class="text-sm font-medium text-gray-500">Endpoint</label>
+                <p class="mt-1 text-gray-700 break-all">{{ s3Cfg.endpoint || '-' }}</p>
               </div>
-              <p class="text-sm text-gray-500">元数据模式：仅存储版本信息，发布时使用外部下载链接</p>
-            </div>
-            <div v-else-if="app.storage_type === 's3'" class="space-y-3">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label class="text-sm font-medium text-gray-500">Endpoint</label>
-                  <p class="mt-1 text-gray-700 break-all">{{ storageConfig.endpoint }}</p>
-                </div>
-                <div>
-                  <label class="text-sm font-medium text-gray-500">Bucket</label>
-                  <p class="mt-1 text-gray-700">{{ storageConfig.bucket }}</p>
-                </div>
-                <div>
-                  <label class="text-sm font-medium text-gray-500">Region</label>
-                  <p class="mt-1 text-gray-700">{{ storageConfig.region }}</p>
-                </div>
-                <div>
-                  <label class="text-sm font-medium text-gray-500">CDN 基础 URL</label>
-                  <p class="mt-1 text-gray-700 break-all">{{ storageConfig.base_url || '未设置' }}</p>
-                </div>
+              <div>
+                <label class="text-sm font-medium text-gray-500">Region</label>
+                <p class="mt-1 text-gray-700">{{ s3Cfg.region || '-' }}</p>
               </div>
-            </div>
-            <div v-else-if="app.storage_type === 'webdav'" class="space-y-3">
-              <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label class="text-sm font-medium text-gray-500">WebDAV URL</label>
-                  <p class="mt-1 text-gray-700 break-all">{{ storageConfig.url }}</p>
-                </div>
-                <div>
-                  <label class="text-sm font-medium text-gray-500">用户名</label>
-                  <p class="mt-1 text-gray-700">{{ storageConfig.username }}</p>
-                </div>
-                <div>
-                  <label class="text-sm font-medium text-gray-500">基础路径</label>
-                  <p class="mt-1 text-gray-700">{{ storageConfig.base_path }}</p>
-                </div>
+              <div>
+                <label class="text-sm font-medium text-gray-500">Bucket</label>
+                <p class="mt-1 text-gray-700">{{ s3Cfg.bucket || '-' }}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-gray-500">下载方式</label>
+                <p class="mt-1 text-gray-700">{{ s3Cfg.download_mode === 'redirect' ? '302 重定向' : '系统代理转发' }}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-gray-500">CDN 基础 URL</label>
+                <p class="mt-1 text-gray-700 break-all">{{ s3Cfg.base_url || '未设置' }}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-gray-500">基础路径</label>
+                <p class="mt-1 text-gray-700">
+                  {{ app.storage_path || s3Cfg.base_path || '根目录' }}
+                  <span v-if="app.storage_path && s3Cfg.base_path" class="text-xs text-gray-400">（覆盖档案默认 {{ s3Cfg.base_path }}）</span>
+                </p>
               </div>
             </div>
+
+            <!-- WebDAV -->
+            <div v-else-if="app.storage_profile.storage_type === 'webdav'" class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div>
+                <label class="text-sm font-medium text-gray-500">WebDAV URL</label>
+                <p class="mt-1 text-gray-700 break-all">{{ webdavCfg.url || '-' }}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-gray-500">用户名</label>
+                <p class="mt-1 text-gray-700">{{ webdavCfg.username || '-' }}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-gray-500">下载方式</label>
+                <p class="mt-1 text-gray-700">{{ webdavCfg.download_mode === 'redirect' ? '302 重定向' : '系统代理转发' }}</p>
+              </div>
+              <div>
+                <label class="text-sm font-medium text-gray-500">基础路径</label>
+                <p class="mt-1 text-gray-700">
+                  {{ app.storage_path || webdavCfg.base_path || '/' }}
+                  <span v-if="app.storage_path && webdavCfg.base_path" class="text-xs text-gray-400">（覆盖档案默认 {{ webdavCfg.base_path }}）</span>
+                </p>
+              </div>
+            </div>
+          </template>
+          <div v-else class="text-center py-6 text-gray-500">
+            <svg class="w-10 h-10 mx-auto mb-2 text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            </svg>
+            <p>此应用为元数据模式</p>
+            <p class="text-xs text-gray-400 mt-1">发布版本时填写外部下载链接即可</p>
           </div>
-          <div v-else class="text-gray-500">暂无存储配置</div>
         </div>
       </div>
 
@@ -205,7 +235,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { getApp } from '../api'
-
+import { success, error, info } from '../composables/useToast'
 const router = useRouter()
 const route = useRoute()
 
@@ -214,31 +244,18 @@ const loading = ref(true)
 const showAccessKey = ref(false)
 const copied = ref(false)
 
-const storageConfig = computed(() => {
-  if (!app.value?.storage_config) return null
-  try {
-    return JSON.parse(app.value.storage_config)
-  } catch (e) {
-    return null
-  }
+const storageProfileConfig = computed(() => {
+  if (!app.value?.storage_profile?.config) return null
+  try { return JSON.parse(app.value.storage_profile.config) } catch { return null }
 })
+const s3Cfg = computed(() => storageProfileConfig.value || {})
+const webdavCfg = computed(() => storageProfileConfig.value || {})
 
-function getStorageTypeLabel(type) {
-  const map = {
-    s3: 'S3 对象存储',
-    webdav: 'WebDAV',
-    metadata: '元数据（本地）'
-  }
-  return map[type] || type
+function storageProfileLabel(type) {
+  return { s3: 'S3 对象存储', webdav: 'WebDAV', metadata: '元数据' }[type] || type
 }
-
-function getStorageBadgeClass(type) {
-  const map = {
-    s3: 'badge-info',
-    webdav: 'badge-warning',
-    metadata: 'badge-success'
-  }
-  return map[type] || 'badge-secondary'
+function storageProfileBadge(type) {
+  return { s3: 'bg-blue-100 text-blue-800', webdav: 'bg-purple-100 text-purple-800', metadata: 'bg-gray-100 text-gray-700' }[type] || 'bg-gray-100'
 }
 
 function formatDate(dateStr) {
@@ -265,7 +282,7 @@ function copyAccessKey() {
       copied.value = false
     }, 2000)
   }).catch(err => {
-    alert('复制失败：' + err.message)
+    error('复制失败：' + err.message)
   })
 }
 
@@ -287,7 +304,7 @@ async function loadApp() {
     const res = await getApp(route.params.id)
     app.value = res
   } catch (err) {
-    alert('加载失败：' + (err.response?.data?.error || err.message))
+    error('加载失败：' + (err.response?.data?.error || err.message))
   } finally {
     loading.value = false
   }

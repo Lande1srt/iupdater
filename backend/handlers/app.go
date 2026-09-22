@@ -11,22 +11,22 @@ import (
 )
 
 type CreateAppRequest struct {
-	AppID         string `json:"app_id" binding:"required"`
-	Name          string `json:"name" binding:"required"`
-	Description   string `json:"description"`
-	Icon          string `json:"icon"`
-	StorageType   string `json:"storage_type"`
-	StorageConfig string `json:"storage_config"`
-	EnableAuth    bool   `json:"enable_auth"`
+	AppID            string `json:"app_id" binding:"required"`
+	Name             string `json:"name" binding:"required"`
+	Description      string `json:"description"`
+	Icon             string `json:"icon"`
+	StorageProfileID *uint  `json:"storage_profile_id"` // null = 元数据模式
+	StoragePath      string `json:"storage_path"`
+	EnableAuth       bool   `json:"enable_auth"`
 }
 
 type UpdateAppRequest struct {
-	Name          string `json:"name"`
-	Description   string `json:"description"`
-	Icon          string `json:"icon"`
-	StorageType   string `json:"storage_type"`
-	StorageConfig string `json:"storage_config"`
-	EnableAuth    bool   `json:"enable_auth"`
+	Name             string `json:"name"`
+	Description      string `json:"description"`
+	Icon             string `json:"icon"`
+	StorageProfileID *uint  `json:"storage_profile_id"`
+	StoragePath      string `json:"storage_path"`
+	EnableAuth       bool   `json:"enable_auth"`
 }
 
 func GetApps(c *gin.Context) {
@@ -44,7 +44,7 @@ func GetApps(c *gin.Context) {
 
 	query.Count(&total)
 	offset := (page - 1) * pageSize
-	query.Offset(offset).Limit(pageSize).Order("id DESC").Find(&apps)
+	query.Preload("StorageProfile").Offset(offset).Limit(pageSize).Order("id DESC").Find(&apps)
 
 	c.JSON(http.StatusOK, gin.H{
 		"list":      apps,
@@ -58,7 +58,7 @@ func GetApp(c *gin.Context) {
 	id := c.Param("id")
 
 	var app models.App
-	if err := models.DB.First(&app, id).Error; err != nil {
+	if err := models.DB.Preload("StorageProfile").First(&app, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "App not found"})
 		return
 	}
@@ -79,9 +79,13 @@ func CreateApp(c *gin.Context) {
 		return
 	}
 
-	storageType := req.StorageType
-	if storageType == "" {
-		storageType = models.StorageTypeMetadata
+	// 校验 storage_profile_id 有效性
+	if req.StorageProfileID != nil {
+		var sp models.StorageProfile
+		if err := models.DB.First(&sp, *req.StorageProfileID).Error; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Storage profile not found"})
+			return
+		}
 	}
 
 	var accessKey string
@@ -90,14 +94,14 @@ func CreateApp(c *gin.Context) {
 	}
 
 	app := models.App{
-		AppID:         req.AppID,
-		Name:          req.Name,
-		Description:   req.Description,
-		Icon:          req.Icon,
-		StorageType:   storageType,
-		StorageConfig: req.StorageConfig,
-		EnableAuth:    req.EnableAuth,
-		AccessKey:     accessKey,
+		AppID:            req.AppID,
+		Name:             req.Name,
+		Description:      req.Description,
+		Icon:             req.Icon,
+		StorageProfileID: req.StorageProfileID,
+		StoragePath:      req.StoragePath,
+		EnableAuth:       req.EnableAuth,
+		AccessKey:        accessKey,
 	}
 
 	if err := models.DB.Create(&app).Error; err != nil {
@@ -105,6 +109,7 @@ func CreateApp(c *gin.Context) {
 		return
 	}
 
+	models.DB.Preload("StorageProfile").First(&app, app.ID)
 	c.JSON(http.StatusOK, app)
 }
 
@@ -128,18 +133,23 @@ func UpdateApp(c *gin.Context) {
 	}
 	app.Description = req.Description
 	app.Icon = req.Icon
-	if req.StorageType != "" {
-		app.StorageType = req.StorageType
+	app.StoragePath = req.StoragePath
+
+	// 支持设为 null（metadata 模式）
+	if req.StorageProfileID != nil {
+		var sp models.StorageProfile
+		if err := models.DB.First(&sp, *req.StorageProfileID).Error; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "Storage profile not found"})
+			return
+		}
+		app.StorageProfileID = req.StorageProfileID
 	}
-	app.StorageConfig = req.StorageConfig
 
 	// 处理校验启用/禁用
 	if req.EnableAuth && !app.EnableAuth {
-		// 从禁用改为启用，生成新的 AccessKey
 		app.EnableAuth = true
 		app.AccessKey = utils.GenerateAccessKey()
 	} else if !req.EnableAuth && app.EnableAuth {
-		// 从启用改为禁用，清空 AccessKey
 		app.EnableAuth = false
 		app.AccessKey = ""
 	}
@@ -149,6 +159,7 @@ func UpdateApp(c *gin.Context) {
 		return
 	}
 
+	models.DB.Preload("StorageProfile").First(&app, app.ID)
 	c.JSON(http.StatusOK, app)
 }
 

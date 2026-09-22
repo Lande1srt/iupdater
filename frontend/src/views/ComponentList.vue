@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div>
     <div class="flex items-center justify-between mb-6">
       <div>
@@ -179,6 +179,16 @@
               <p v-if="uploadForm.file" class="text-sm text-gray-500 mt-1">
                 已选择：{{ uploadForm.file.name }} ({{ formatSize(uploadForm.file.size) }})
               </p>
+              <!-- 上传进度条 -->
+              <div v-if="uploading" class="mt-3">
+                <div class="flex justify-between text-xs text-gray-600 mb-1">
+                  <span>上传中...</span>
+                  <span>{{ uploadProgress }}%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                  <div class="bg-blue-500 h-2.5 rounded-full transition-all duration-200" :style="{ width: uploadProgress + '%' }"></div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
@@ -197,7 +207,7 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { getComponents, uploadComponentFile, updateComponentStatus, deleteComponent as deleteComponentApi, getApp } from '../api'
-
+import { success, error, info, confirm as askConfirm } from '../composables/useToast'
 const route = useRoute()
 const router = useRouter()
 
@@ -211,6 +221,7 @@ const pageSize = ref(20)
 const channel = ref('')
 const showUploadModal = ref(false)
 const uploading = ref(false)
+const uploadProgress = ref(0)
 const fileInput = ref(null)
 
 const uploadForm = ref({
@@ -281,23 +292,29 @@ function changePage(p) {
 
 async function uploadComponent() {
   if (!uploadForm.value.component_key || !uploadForm.value.name || !uploadForm.value.version_name) {
-    alert('请填写组件Key、组件名称和版本名称')
+    info('请填写组件Key、组件名称和版本名称')
     return
   }
   
   if (appStorageType.value === 'metadata') {
     if (!uploadForm.value.download_url) {
-      alert('请填写下载链接')
+      info('请填写下载链接')
       return
     }
   } else {
     if (!uploadForm.value.file) {
-      alert('请选择组件文件')
+      info('请选择组件文件')
       return
     }
   }
 
   uploading.value = true
+  uploadProgress.value = 0
+  const onProgress = (e) => {
+    if (e.total > 0) {
+      uploadProgress.value = Math.round((e.loaded * 100) / e.total)
+    }
+  }
   try {
     const app = await getApp(appId)
     const formData = new FormData()
@@ -322,12 +339,12 @@ async function uploadComponent() {
       formData.append('file', uploadForm.value.file)
     }
 
-    await uploadComponentFile(formData)
+    await uploadComponentFile(formData, onProgress)
     showUploadModal.value = false
     resetUploadForm()
     loadComponents()
   } catch (err) {
-    alert('上传失败：' + (err.response?.data?.error || err.message))
+    error('上传失败：' + (err.response?.data?.error || err.message))
   } finally {
     uploading.value = false
   }
@@ -339,12 +356,12 @@ async function toggleStatus(comp) {
     await updateComponentStatus(comp.id, newStatus)
     comp.status = newStatus
   } catch (err) {
-    alert('操作失败：' + (err.response?.data?.error || err.message))
+    error('操作失败：' + (err.response?.data?.error || err.message))
   }
 }
 
 async function deleteComponent(comp) {
-  if (!confirm(`确定要删除组件 "${comp.name}" 吗？`)) {
+  if (!(await askConfirm(`确定要删除组件 "${comp.name}" 吗？`))) {
     return
   }
 
@@ -352,13 +369,21 @@ async function deleteComponent(comp) {
     await deleteComponentApi(comp.id)
     loadComponents()
   } catch (err) {
-    alert('删除失败：' + (err.response?.data?.error || err.message))
+    error('删除失败：' + (err.response?.data?.error || err.message))
   }
 }
 
 function copyUrl(url) {
-  navigator.clipboard.writeText(url).then(() => {
-    alert('链接已复制到剪贴板')
+  let fullUrl
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    fullUrl = url
+  } else if (url.startsWith('/')) {
+    fullUrl = window.location.origin + url
+  } else {
+    fullUrl = window.location.origin + '/api/download/' + url
+  }
+  navigator.clipboard.writeText(fullUrl).then(() => {
+    success('链接已复制到剪贴板')
   })
 }
 

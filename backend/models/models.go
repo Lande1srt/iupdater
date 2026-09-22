@@ -23,18 +23,19 @@ const (
 )
 
 type App struct {
-	ID            uint           `gorm:"primaryKey" json:"id"`
-	AppID         string         `gorm:"uniqueIndex;size:100;not null" json:"app_id"`
-	Name          string         `gorm:"size:200;not null" json:"name"`
-	Description   string         `gorm:"type:text" json:"description"`
-	Icon          string         `gorm:"size:500" json:"icon"`
-	StorageType   string         `gorm:"size:20;not null;default:'metadata'" json:"storage_type"`
-	StorageConfig string         `gorm:"type:text" json:"storage_config"`
-	EnableAuth    bool           `gorm:"default:false" json:"enable_auth"`
-	AccessKey     string         `gorm:"size:16" json:"access_key"`
-	CreatedAt     time.Time      `json:"created_at"`
-	UpdatedAt     time.Time      `json:"updated_at"`
-	DeletedAt     gorm.DeletedAt `gorm:"index" json:"-"`
+	ID               uint            `gorm:"primaryKey" json:"id"`
+	AppID            string          `gorm:"uniqueIndex;size:100;not null" json:"app_id"`
+	Name             string          `gorm:"size:200;not null" json:"name"`
+	Description      string          `gorm:"type:text" json:"description"`
+	Icon             string          `gorm:"size:500" json:"icon"`
+	StorageProfileID *uint           `gorm:"index" json:"storage_profile_id"` // 引用存储档案，metadata 为 null
+	StorageProfile   *StorageProfile `gorm:"foreignKey:StorageProfileID" json:"storage_profile,omitempty"`
+	StoragePath      string          `gorm:"size:500" json:"storage_path"` // 可选的自定义基础路径，覆盖档案的 base_path
+	EnableAuth       bool            `gorm:"default:false" json:"enable_auth"`
+	AccessKey        string          `gorm:"size:16" json:"access_key"`
+	CreatedAt        time.Time       `json:"created_at"`
+	UpdatedAt        time.Time       `json:"updated_at"`
+	DeletedAt        gorm.DeletedAt  `gorm:"index" json:"-"`
 }
 
 type AppVersion struct {
@@ -84,4 +85,17 @@ type StorageConfig struct {
 	Config      string    `gorm:"type:text" json:"config"`
 	CreatedAt   time.Time `json:"created_at"`
 	UpdatedAt   time.Time `json:"updated_at"`
+}
+
+// StorageProfile 可复用的存储配置档案（侧边栏"存储管理"）
+// 多个 App 可复用同一个 StorageProfile，各自覆盖 base_path 即可
+type StorageProfile struct {
+	ID          uint           `gorm:"primaryKey" json:"id"`
+	Name        string         `gorm:"size:200;not null" json:"name"`
+	Description string         `gorm:"type:text" json:"description"`
+	StorageType string         `gorm:"size:20;not null" json:"storage_type"`
+	Config      string         `gorm:"type:text;not null" json:"config"`
+	CreatedAt   time.Time      `json:"created_at"`
+	UpdatedAt   time.Time      `json:"updated_at"`
+	DeletedAt   gorm.DeletedAt `gorm:"index" json:"-"`
 }

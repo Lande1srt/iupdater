@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div>
     <div class="flex items-center justify-between mb-6">
       <div>
@@ -201,6 +201,16 @@
               <p v-if="uploadForm.file" class="text-sm text-gray-500 mt-1">
                 已选择：{{ uploadForm.file.name }} ({{ formatSize(uploadForm.file.size) }})
               </p>
+              <!-- 上传进度条 -->
+              <div v-if="uploading" class="mt-3">
+                <div class="flex justify-between text-xs text-gray-600 mb-1">
+                  <span>上传中...</span>
+                  <span>{{ uploadProgress }}%</span>
+                </div>
+                <div class="w-full bg-gray-200 rounded-full h-2.5 overflow-hidden">
+                  <div class="bg-blue-500 h-2.5 rounded-full transition-all duration-200" :style="{ width: uploadProgress + '%' }"></div>
+                </div>
+              </div>
             </div>
             
             <div>
@@ -223,6 +233,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { success, error, info, confirm as askConfirm } from '../composables/useToast'
 import { getVersions, uploadVersionFile, updateVersionStatus, deleteVersion as deleteVersionApi, getApp, probeFileInfo } from '../api'
 
 const route = useRoute()
@@ -238,6 +249,7 @@ const pageSize = ref(20)
 const channel = ref('')
 const showUploadModal = ref(false)
 const uploading = ref(false)
+const uploadProgress = ref(0)
 const probing = ref(false)
 const fileInput = ref(null)
 
@@ -310,7 +322,7 @@ function changePage(p) {
 
 async function probeFile() {
   if (!uploadForm.value.download_url) {
-    alert('请先填写下载链接')
+    info('请先填写下载链接')
     return
   }
   
@@ -319,12 +331,12 @@ async function probeFile() {
     const result = await probeFileInfo(uploadForm.value.download_url)
     if (result.file_size) {
       uploadForm.value.file_size = result.file_size.toString()
-      alert(`成功获取文件大小：${formatSize(result.file_size)}`)
+      info(`成功获取文件大小：${formatSize(result.file_size)}`)
     } else if (result.message) {
-      alert(result.message)
+      info(result.message)
     }
   } catch (err) {
-    alert('探测失败：' + (err.response?.data?.error || err.message))
+    error('探测失败：' + (err.response?.data?.error || err.message))
   } finally {
     probing.value = false
   }
@@ -332,24 +344,30 @@ async function probeFile() {
 
 async function uploadVersion() {
   if (!uploadForm.value.version_name) {
-    alert('请输入版本名称')
+    info('请输入版本名称')
     return
   }
   
   // 元数据模式验证下载链接，其他模式验证文件
   if (appStorageType.value === 'metadata') {
     if (!uploadForm.value.download_url) {
-      alert('请填写下载链接')
+      info('请填写下载链接')
       return
     }
   } else {
     if (!uploadForm.value.file) {
-      alert('请选择更新文件')
+      info('请选择更新文件')
       return
     }
   }
 
   uploading.value = true
+  uploadProgress.value = 0
+  const onProgress = (e) => {
+    if (e.total > 0) {
+      uploadProgress.value = Math.round((e.loaded * 100) / e.total)
+    }
+  }
   try {
     const app = await getApp(appId)
     const formData = new FormData()
@@ -376,12 +394,12 @@ async function uploadVersion() {
       formData.append('file', uploadForm.value.file)
     }
 
-    await uploadVersionFile(formData)
+    await uploadVersionFile(formData, onProgress)
     showUploadModal.value = false
     resetUploadForm()
     loadVersions()
   } catch (err) {
-    alert('上传失败：' + (err.response?.data?.error || err.message))
+    error('上传失败：' + (err.response?.data?.error || err.message))
   } finally {
     uploading.value = false
   }
@@ -393,12 +411,12 @@ async function toggleStatus(ver) {
     await updateVersionStatus(ver.id, newStatus)
     ver.status = newStatus
   } catch (err) {
-    alert('操作失败：' + (err.response?.data?.error || err.message))
+    error('操作失败：' + (err.response?.data?.error || err.message))
   }
 }
 
 async function deleteVersion(ver) {
-  if (!confirm(`确定要删除版本 ${ver.version_name} 吗？`)) {
+  if (!(await askConfirm(`确定要删除版本 ${ver.version_name} 吗？`))) {
     return
   }
 
@@ -406,13 +424,23 @@ async function deleteVersion(ver) {
     await deleteVersionApi(ver.id)
     loadVersions()
   } catch (err) {
-    alert('删除失败：' + (err.response?.data?.error || err.message))
+    error('删除失败：' + (err.response?.data?.error || err.message))
   }
 }
 
 function copyUrl(url) {
-  navigator.clipboard.writeText(url).then(() => {
-    alert('链接已复制到剪贴板')
+  let fullUrl
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    fullUrl = url
+  } else if (url.startsWith('/')) {
+    // 已带 /api/download/ 前缀
+    fullUrl = window.location.origin + url
+  } else {
+    // 裸 key（历史数据），补全代理入口
+    fullUrl = window.location.origin + '/api/download/' + url
+  }
+  navigator.clipboard.writeText(fullUrl).then(() => {
+    success('链接已复制到剪贴板')
   })
 }
 

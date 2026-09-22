@@ -3,6 +3,7 @@ package handlers
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -48,6 +49,9 @@ func GetVersions(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	query.Offset(offset).Limit(pageSize).Order("version_code DESC").Find(&versions)
 
+	// 批量把 download_url 转成完整直链
+	resolveVersionList(c, versions)
+
 	c.JSON(http.StatusOK, gin.H{
 		"list":      versions,
 		"total":     total,
@@ -63,6 +67,12 @@ func GetVersion(c *gin.Context) {
 	if err := models.DB.First(&version, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Version not found"})
 		return
+	}
+
+	// resolve download_url 为完整直链
+	var app models.App
+	if err := models.DB.Where("app_id = ?", version.AppID).First(&app).Error; err == nil {
+		version.DownloadURL = resolveDownloadURL(c, version.DownloadURL, app)
 	}
 
 	c.JSON(http.StatusOK, version)
@@ -123,6 +133,7 @@ func CreateVersion(c *gin.Context) {
 		return
 	}
 
+	version.DownloadURL = resolveDownloadURL(c, version.DownloadURL, app)
 	c.JSON(http.StatusOK, version)
 }
 
@@ -153,7 +164,13 @@ func UploadVersionFile(c *gin.Context) {
 	var finalDownloadURL string
 
 	// 元数据模式：使用外部下载链接，不上传文件
-	if app.StorageType == "metadata" {
+	storageType, storageConfig, err := ResolveAppStorage(&app)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "storage profile not found"})
+		return
+	}
+
+	if storageType == "metadata" {
 		if downloadURL == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "download_url is required for metadata storage"})
 			return
@@ -185,17 +202,25 @@ func UploadVersionFile(c *gin.Context) {
 
 		fileHash = utils.ComputeBytesHash(fileData)
 
-		adapter, err := storage.NewStorageAdapter(app.StorageType, app.StorageConfig)
+		log.Printf("[Upload] app_id=%s storage_type=%s storage_config_len=%d file_bytes=%d",
+			appID, storageType, len(storageConfig), len(fileData))
+
+		adapter, err := storage.NewStorageAdapter(storageType, storageConfig)
 		if err != nil {
+			log.Printf("[Upload] NewStorageAdapter FAILED: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to init storage: " + err.Error()})
 			return
 		}
 
-		finalDownloadURL, fileSize, err = adapter.Upload(header.Filename, fileData)
+		var key string
+		key, fileSize, err = adapter.Upload(header.Filename, fileData)
 		if err != nil {
+			log.Printf("[Upload] adapter.Upload FAILED: %v", err)
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file: " + err.Error()})
 			return
 		}
+		log.Printf("[Upload] SUCCESS key=%q size=%d download_url=%q", key, fileSize, adapter.GetURL(key))
+		finalDownloadURL = adapter.GetURL(key)
 	}
 
 	if channel == "" {
@@ -235,6 +260,7 @@ func UploadVersionFile(c *gin.Context) {
 		return
 	}
 
+	version.DownloadURL = resolveDownloadURL(c, version.DownloadURL, app)
 	c.JSON(http.StatusOK, version)
 }
 
@@ -298,6 +324,10 @@ func UpdateVersionStatus(c *gin.Context) {
 		return
 	}
 
+	var app models.App
+	if err := models.DB.Where("app_id = ?", version.AppID).First(&app).Error; err == nil {
+		version.DownloadURL = resolveDownloadURL(c, version.DownloadURL, app)
+	}
 	c.JSON(http.StatusOK, version)
 }
 

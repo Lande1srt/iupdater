@@ -1,4 +1,4 @@
-package handlers
+﻿package handlers
 
 import (
 	"fmt"
@@ -48,6 +48,9 @@ func GetComponents(c *gin.Context) {
 	offset := (page - 1) * pageSize
 	query.Offset(offset).Limit(pageSize).Order("id DESC").Find(&components)
 
+	// 批量把 download_url 转成完整直链
+	resolveComponentList(c, components)
+
 	c.JSON(http.StatusOK, gin.H{
 		"list":      components,
 		"total":     total,
@@ -63,6 +66,11 @@ func GetComponent(c *gin.Context) {
 	if err := models.DB.First(&component, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Component not found"})
 		return
+	}
+
+	var app models.App
+	if err := models.DB.Where("app_id = ?", component.AppID).First(&app).Error; err == nil {
+		component.DownloadURL = resolveDownloadURL(c, component.DownloadURL, app)
 	}
 
 	c.JSON(http.StatusOK, component)
@@ -123,6 +131,7 @@ func CreateComponent(c *gin.Context) {
 		return
 	}
 
+	component.DownloadURL = resolveDownloadURL(c, component.DownloadURL, app)
 	c.JSON(http.StatusOK, component)
 }
 
@@ -152,7 +161,13 @@ func UploadComponentFile(c *gin.Context) {
 	var fileSize int64
 	var finalDownloadURL string
 
-	if app.StorageType == "metadata" {
+	storageType, storageConfig, err := ResolveAppStorage(&app)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "storage profile not found"})
+		return
+	}
+
+	if storageType == "metadata" {
 		if downloadURL == "" {
 			c.JSON(http.StatusBadRequest, gin.H{"error": "download_url is required for metadata storage"})
 			return
@@ -182,17 +197,19 @@ func UploadComponentFile(c *gin.Context) {
 
 		fileHash = utils.ComputeBytesHash(fileData)
 
-		adapter, err := storage.NewStorageAdapter(app.StorageType, app.StorageConfig)
+		adapter, err := storage.NewStorageAdapter(storageType, storageConfig)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to init storage: " + err.Error()})
 			return
 		}
 
-		finalDownloadURL, fileSize, err = adapter.Upload(header.Filename, fileData)
+		var key string
+		key, fileSize, err = adapter.Upload(header.Filename, fileData)
 		if err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to upload file: " + err.Error()})
 			return
 		}
+		finalDownloadURL = adapter.GetURL(key)
 	}
 
 	if channel == "" {
@@ -232,6 +249,7 @@ func UploadComponentFile(c *gin.Context) {
 		return
 	}
 
+	component.DownloadURL = resolveDownloadURL(c, component.DownloadURL, app)
 	c.JSON(http.StatusOK, component)
 }
 
@@ -258,6 +276,10 @@ func UpdateComponentStatus(c *gin.Context) {
 		return
 	}
 
+	var app models.App
+	if err := models.DB.Where("app_id = ?", component.AppID).First(&app).Error; err == nil {
+		component.DownloadURL = resolveDownloadURL(c, component.DownloadURL, app)
+	}
 	c.JSON(http.StatusOK, component)
 }
 
