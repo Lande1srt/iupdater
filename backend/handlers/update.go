@@ -18,6 +18,53 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// normalizePlatform / normalizeArchitecture 把用户传入的常见别名归一成数据库存储时用的 canonical 值
+// 存什么值由上传方（admin UI / agent）决定，这里尽量兼容：
+//   platform:   保持原样
+//   arch:       x86_64→amd64, aarch64→arm64, i386/x86→386
+// archMatchList 生成的 IN 列表包含 canonical 值 + 它的常见别名 + "all"，确保无论 DB 里存什么写法都能命中
+
+// archCanonical: 把常见架构别名统一到 canonical 值（Go runtime / 主流工具链的写法）
+var archCanonical = map[string]string{
+	"x86_64":  "amd64",
+	"aarch64": "arm64",
+	"i386":    "386",
+	"x86":     "386",
+	"amd64":   "amd64",
+	"arm64":   "arm64",
+	"386":     "386",
+	"all":     "all",
+}
+
+func normalizeArchitecture(in string) string {
+	if in == "" {
+		return in
+	}
+	if v, ok := archCanonical[strings.ToLower(in)]; ok {
+		return v
+	}
+	return in
+}
+
+// matchPlatformArch 构造 WHERE 平台/架构匹配子句。
+// 兼容两种存储值：用户上传时可能填 Go runtime 值（amd64/arm64）也可能填通用值（x86_64/aarch64），
+// 这里生成 IN 列表把「用户传入的 canonical 值 + 它的别名 + all」都包含进去，保证能命中。
+func archMatchList(canonical string) []string {
+	out := []string{canonical, "all"}
+	if canonical == "amd64" {
+		out = append(out, "x86_64")
+	} else if canonical == "arm64" {
+		out = append(out, "aarch64")
+	} else if canonical == "386" {
+		out = append(out, "i386", "x86")
+	}
+	return out
+}
+
+func platformMatchList(platform string) []string {
+	return []string{platform, "all"}
+}
+
 // resolveDownloadURL 根据存储配置把 DB 里存的 download_url 转换成客户端可用的完整下载链接
 // 优先级：CDN BaseURL → redirect 直链 → proxy 绝对路径
 // DB 里可能存三种格式：
@@ -228,12 +275,12 @@ func CheckUpdate(c *gin.Context) {
 		channel = models.ChannelStable
 	}
 
-	platform := req.Platform
+	platform := strings.ToLower(req.Platform)
 	if platform == "" {
 		platform = "all"
 	}
 
-	arch := req.Architecture
+	arch := normalizeArchitecture(strings.ToLower(req.Architecture))
 	if arch == "" {
 		arch = "all"
 	}
@@ -241,8 +288,8 @@ func CheckUpdate(c *gin.Context) {
 	var latestVersion models.AppVersion
 	result := models.DB.Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ?",
 		req.AppID, channel, models.PackageTypeFull).
-		Where("platform IN ?", []string{platform, "all"}).
-		Where("architecture IN ?", []string{arch, "all"}).
+		Where("platform IN ?", platformMatchList(platform)).
+		Where("architecture IN ?", archMatchList(arch)).
 		Order("version_code DESC").
 		First(&latestVersion)
 
@@ -271,8 +318,8 @@ func CheckUpdate(c *gin.Context) {
 
 	var components []models.Component
 	models.DB.Where("app_id = ? AND channel = ? AND status = 1", req.AppID, channel).
-		Where("platform IN ?", []string{platform, "all"}).
-		Where("architecture IN ?", []string{arch, "all"}).
+		Where("platform IN ?", platformMatchList(platform)).
+		Where("architecture IN ?", archMatchList(arch)).
 		Find(&components)
 
 	for _, comp := range components {
@@ -318,39 +365,94 @@ func GetLatestVersion(c *gin.Context) {
 		}
 	}
 
-	// 查询参数
+	// 查询参数 —— 先做 alias 归一化（x86_64 → amd64, aarch64 → arm64 等）
 	channel := c.DefaultQuery("channel", models.ChannelStable)
-	platform := c.Query("platform")
-	arch := c.Query("architecture")
+	platform := strings.ToLower(strings.TrimSpace(c.Query("platform")))
+	archRaw := strings.ToLower(strings.TrimSpace(c.Query("architecture")))
+	arch := normalizeArchitecture(archRaw)
 
-	// 构建查询
-	query := models.DB.Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ?",
+	// 1) 最新版本 code —— 如果用户传了 platform/arch，就在指定范围内找 MAX；
+	//    这样避免跨平台独立自增 version_code 时，MAX 拿到别的平台的版本组
+	//    显式 .Table("app_versions") 避免 GORM 在 Select+Scan 非 Find 路径下丢失表名绑定
+	maxQuery := models.DB.Table("app_versions").Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ?",
 		appID, channel, models.PackageTypeFull)
-
-	// 显式传了 platform 才过滤，否则匹配所有
 	if platform != "" {
-		query = query.Where("platform IN ?", []string{platform, "all"})
+		maxQuery = maxQuery.Where("platform IN ?", platformMatchList(platform))
 	}
 	if arch != "" {
-		query = query.Where("architecture IN ?", []string{arch, "all"})
+		maxQuery = maxQuery.Where("architecture IN ?", archMatchList(arch))
 	}
-
-	// 查询最新版本
-	var latestVersion models.AppVersion
-	result := query.Order("version_code DESC").First(&latestVersion)
-
-	if result.Error != nil {
-		c.JSON(http.StatusNotFound, gin.H{"error": "No published version found", "channel": channel, "platform": platform})
+	var latestCode int64
+	if err := maxQuery.Select("MAX(version_code)").Scan(&latestCode).Error; err != nil || latestCode == 0 {
+		c.JSON(http.StatusNotFound, gin.H{"error": "No published version found", "channel": channel})
 		return
 	}
+
+	// 2) 在这个版本组里匹配
+	query := models.DB.Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ? AND version_code = ?",
+		appID, channel, models.PackageTypeFull, latestCode)
+	if platform != "" {
+		query = query.Where("platform IN ?", platformMatchList(platform))
+	}
+	if arch != "" {
+		query = query.Where("architecture IN ?", archMatchList(arch))
+	}
+	var candidates []models.AppVersion
+	if err := query.Order("version_code DESC").Find(&candidates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	if len(candidates) == 0 {
+		// 额外诊断：抓一下这个版本组里实际有哪些 platform/arch，方便生产排错
+		var inGroup []struct{ Platform, Architecture, PackageType string; Status int }
+		models.DB.Where("app_id = ? AND channel = ? AND version_code = ?", appID, channel, latestCode).
+			Distinct("platform", "architecture", "package_type", "status").
+			Find(&inGroup)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":                     "No published version found for the given filters",
+			"channel":                   channel,
+			"platform":                  platform,
+			"architecture":              arch,
+			"latest_version_group_code": latestCode,
+			"group_actual":              inGroup,
+			"hint":                      "版本组内未匹配指定 platform/architecture，请检查参数；architecture 别名可用 x86_64/amd64、aarch64/arm64",
+		})
+		return
+	}
+
+	// 用户未指定 platform/arch 时的智能处理
+	if platform == "" && arch == "" {
+		if len(candidates) > 1 {
+			// 多个平台 —— 报错提示必须指定
+			var platforms []string
+			seen := map[string]bool{}
+			for _, v := range candidates {
+				if !seen[v.Platform] {
+					seen[v.Platform] = true
+					platforms = append(platforms, v.Platform)
+				}
+			}
+			c.JSON(http.StatusConflict, gin.H{
+				"error":              "最新版本组存在多平台，请指定 platform 参数",
+				"platforms":          platforms,
+				"hint":               "使用 ?platform=windows 或 ?platform=linux&architecture=amd64",
+				"version_group_code": latestCode,
+			})
+			return
+		}
+		// 唯一候选 —— 直接返回
+	}
+
+	latestVersion := candidates[0]
 
 	// 查询组件
 	compQuery := models.DB.Where("app_id = ? AND channel = ? AND status = 1", appID, channel)
 	if platform != "" {
-		compQuery = compQuery.Where("platform IN ?", []string{platform, "all"})
+		compQuery = compQuery.Where("platform IN ?", platformMatchList(platform))
 	}
 	if arch != "" {
-		compQuery = compQuery.Where("architecture IN ?", []string{arch, "all"})
+		compQuery = compQuery.Where("architecture IN ?", archMatchList(arch))
 	}
 	var components []models.Component
 	compQuery.Find(&components)
@@ -413,24 +515,314 @@ func GetLatestLink(c *gin.Context) {
 	}
 
 	channel := c.DefaultQuery("channel", models.ChannelStable)
-	platform := c.Query("platform")
-	arch := c.Query("architecture")
+	platform := strings.ToLower(strings.TrimSpace(c.Query("platform")))
+	archRaw := strings.ToLower(strings.TrimSpace(c.Query("architecture")))
+	arch := normalizeArchitecture(archRaw)
 
-	query := models.DB.Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ?",
+	// 1) 最新版本 code —— 用户传了 platform/arch 时在指定范围内找 MAX
+	maxQuery := models.DB.Table("app_versions").Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ?",
 		appID, channel, models.PackageTypeFull)
 	if platform != "" {
-		query = query.Where("platform IN ?", []string{platform, "all"})
+		maxQuery = maxQuery.Where("platform IN ?", platformMatchList(platform))
 	}
 	if arch != "" {
-		query = query.Where("architecture IN ?", []string{arch, "all"})
+		maxQuery = maxQuery.Where("architecture IN ?", archMatchList(arch))
 	}
-
-	var latestVersion models.AppVersion
-	if err := query.Order("version_code DESC").First(&latestVersion).Error; err != nil {
+	var latestCode int64
+	if err := maxQuery.Select("MAX(version_code)").Scan(&latestCode).Error; err != nil || latestCode == 0 {
 		c.JSON(http.StatusNotFound, gin.H{"error": "No published version found"})
 		return
 	}
 
+	// 2) 在这个版本组里匹配
+	query := models.DB.Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ? AND version_code = ?",
+		appID, channel, models.PackageTypeFull, latestCode)
+	if platform != "" {
+		query = query.Where("platform IN ?", platformMatchList(platform))
+	}
+	if arch != "" {
+		query = query.Where("architecture IN ?", archMatchList(arch))
+	}
+	var candidates []models.AppVersion
+	if err := query.Order("version_code DESC").Find(&candidates).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	if len(candidates) == 0 {
+		var inGroup []struct{ Platform, Architecture, PackageType string; Status int }
+		models.DB.Where("app_id = ? AND channel = ? AND version_code = ?", appID, channel, latestCode).
+			Distinct("platform", "architecture", "package_type", "status").
+			Find(&inGroup)
+		c.JSON(http.StatusNotFound, gin.H{
+			"error":                     "No published version found for the given filters",
+			"platform":                  platform,
+			"architecture":              arch,
+			"latest_version_group_code": latestCode,
+			"group_actual":              inGroup,
+			"hint":                      "请检查 platform/architecture 是否与数据库一致；architecture 别名可用 x86_64/amd64、aarch64/arm64",
+		})
+		return
+	}
+
+	if platform == "" && arch == "" && len(candidates) > 1 {
+		var platforms []string
+		seen := map[string]bool{}
+		for _, v := range candidates {
+			if !seen[v.Platform] {
+				seen[v.Platform] = true
+				platforms = append(platforms, v.Platform)
+			}
+		}
+		c.JSON(http.StatusConflict, gin.H{
+			"error":     "最新版本组存在多平台，请指定 platform 查询参数",
+			"platforms": platforms,
+			"hint":      "GET /u/getlink/:appid?platform=windows 或 /u/getlink/:appid?platform=linux&architecture=amd64",
+		})
+		return
+	}
+
+	latestVersion := candidates[0]
+
 	link := resolveDownloadURL(c, latestVersion.DownloadURL, app)
 	c.Redirect(http.StatusFound, link)
+}
+
+// ---------- 公开元数据接口（新） ----------
+
+// VersionMeta 公开返回的版本元数据（不暴露 internal 字段）
+type VersionMeta struct {
+	AppID        string `json:"app_id"`
+	VersionCode  int64  `json:"version_code"`
+	VersionName  string `json:"version_name"`
+	Channel      string `json:"channel"`
+	Platform     string `json:"platform"`
+	Architecture string `json:"architecture"`
+	PackageType  string `json:"package_type"`
+	FileSize     int64  `json:"file_size"`
+	FileHash     string `json:"file_hash"`
+	DownloadURL  string `json:"download_url"`
+	ReleaseNotes string `json:"release_notes"`
+	IsForce      bool   `json:"is_force_update"`
+	Status       int    `json:"status"`
+	CreatedAt    string `json:"created_at"`
+}
+
+func toVersionMeta(c *gin.Context, app models.App, v models.AppVersion) VersionMeta {
+	return VersionMeta{
+		AppID:        v.AppID,
+		VersionCode:  v.VersionCode,
+		VersionName:  v.VersionName,
+		Channel:      v.Channel,
+		Platform:     v.Platform,
+		Architecture: v.Architecture,
+		PackageType:  v.PackageType,
+		FileSize:     v.FileSize,
+		FileHash:     v.FileHash,
+		DownloadURL:  resolveDownloadURL(c, v.DownloadURL, app),
+		ReleaseNotes: v.ReleaseNotes,
+		IsForce:      v.IsForceUpdate,
+		Status:       v.Status,
+		CreatedAt:    v.CreatedAt.Format("2006-01-02T15:04:05Z07:00"),
+	}
+}
+
+// sharedLatestVersionQuery 抽取 GetMeta / GetLatestVersion / GetLatestLink 共用的两步查询
+// 返回 (candidates, latestCode, app, errCode, errBody)
+// errCode == 0 表示成功，errCode != 0 时调用方应直接 c.JSON 返回 errBody
+func sharedLatestVersionQuery(c *gin.Context) ([]models.AppVersion, int64, models.AppVersion, int, gin.H) {
+	appID := c.Param("appid")
+	if appID == "" {
+		appID = c.Query("appid")
+	}
+
+	var app models.App
+	if err := models.DB.Where("app_id = ?", appID).First(&app).Error; err != nil {
+		return nil, 0, models.AppVersion{}, http.StatusNotFound, gin.H{"error": "App not found"}
+	}
+
+	if app.EnableAuth {
+		ak := c.Query("access_key")
+		if ak == "" || ak != app.AccessKey {
+			return nil, 0, models.AppVersion{}, http.StatusUnauthorized, gin.H{"error": "Invalid or missing access key"}
+		}
+	}
+
+	channel := c.DefaultQuery("channel", models.ChannelStable)
+	platform := strings.ToLower(strings.TrimSpace(c.Query("platform")))
+	archRaw := strings.ToLower(strings.TrimSpace(c.Query("architecture")))
+	arch := normalizeArchitecture(archRaw)
+
+	// 1) MAX
+	maxQuery := models.DB.Table("app_versions").Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ?",
+		appID, channel, models.PackageTypeFull)
+	if platform != "" {
+		maxQuery = maxQuery.Where("platform IN ?", platformMatchList(platform))
+	}
+	if arch != "" {
+		maxQuery = maxQuery.Where("architecture IN ?", archMatchList(arch))
+	}
+	var latestCode int64
+	if err := maxQuery.Select("MAX(version_code)").Scan(&latestCode).Error; err != nil || latestCode == 0 {
+		return nil, 0, models.AppVersion{}, http.StatusNotFound, gin.H{"error": "No published version found", "channel": channel}
+	}
+
+	// 2) 在这个版本组里匹配
+	query := models.DB.Where("app_id = ? AND channel = ? AND status = 1 AND package_type = ? AND version_code = ?",
+		appID, channel, models.PackageTypeFull, latestCode)
+	if platform != "" {
+		query = query.Where("platform IN ?", platformMatchList(platform))
+	}
+	if arch != "" {
+		query = query.Where("architecture IN ?", archMatchList(arch))
+	}
+	var candidates []models.AppVersion
+	if err := query.Order("version_code DESC").Find(&candidates).Error; err != nil {
+		return nil, 0, models.AppVersion{}, http.StatusInternalServerError, gin.H{"error": err.Error()}
+	}
+
+	if len(candidates) == 0 {
+		var inGroup []struct{ Platform, Architecture, PackageType string; Status int }
+		models.DB.Where("app_id = ? AND channel = ? AND version_code = ?", appID, channel, latestCode).
+			Distinct("platform", "architecture", "package_type", "status").
+			Find(&inGroup)
+		return nil, latestCode, models.AppVersion{}, http.StatusNotFound, gin.H{
+			"error":                     "No published version found for the given filters",
+			"channel":                   channel,
+			"platform":                  platform,
+			"architecture":              arch,
+			"latest_version_group_code": latestCode,
+			"group_actual":              inGroup,
+			"hint":                      "请检查 platform/architecture 参数；architecture 别名可用 x86_64/amd64、aarch64/arm64",
+		}
+	}
+
+	// 无 platform/arch 且候选 > 1 → 409
+	if platform == "" && arch == "" && len(candidates) > 1 {
+		var platforms []string
+		seen := map[string]bool{}
+		for _, v := range candidates {
+			if !seen[v.Platform] {
+				seen[v.Platform] = true
+				platforms = append(platforms, v.Platform)
+			}
+		}
+		return nil, latestCode, models.AppVersion{}, http.StatusConflict, gin.H{
+			"error":              "最新版本组存在多平台，请指定 platform 参数",
+			"platforms":          platforms,
+			"hint":               "GET /u/getmeta/:appid?platform=windows 或 /u/getmeta/:appid?platform=linux&architecture=amd64",
+			"version_group_code": latestCode,
+		}
+	}
+
+	return candidates, latestCode, models.AppVersion{}, 0, nil
+}
+
+// GetMeta 返回最新版本的元数据 JSON（重写原 /u/:appid）
+// 用法: GET /u/getmeta/:appid?channel=stable&platform=windows&architecture=x86_64
+func GetMeta(c *gin.Context) {
+	appID := c.Param("appid")
+
+	var app models.App
+	if err := models.DB.Where("app_id = ?", appID).First(&app).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "App not found"})
+		return
+	}
+	if app.EnableAuth {
+		if ak := c.Query("access_key"); ak == "" || ak != app.AccessKey {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing access key"})
+			return
+		}
+	}
+
+	candidates, _, _, errCode, errBody := sharedLatestVersionQuery(c)
+	if errCode != 0 {
+		c.JSON(errCode, errBody)
+		return
+	}
+	c.JSON(http.StatusOK, toVersionMeta(c, app, candidates[0]))
+}
+
+// ListMeta 列出指定应用的所有已发布版本元数据
+// 用法: GET /u/listmeta/:appid?channel=stable&platform=windows&architecture=x86_64&limit=50&include_status=0
+//   channel / platform / architecture  过滤；都可省
+//   order                              "desc"(默认，按 version_code DESC) 或 "asc"
+//   limit                              默认 50，<=0 则不限制（上限 500）
+//   include_status                     "1" 包含 status != 1 的历史版本（默认只返回 status=1）
+func ListMeta(c *gin.Context) {
+	appID := c.Param("appid")
+
+	var app models.App
+	if err := models.DB.Where("app_id = ?", appID).First(&app).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "App not found"})
+		return
+	}
+	if app.EnableAuth {
+		if ak := c.Query("access_key"); ak == "" || ak != app.AccessKey {
+			c.JSON(http.StatusUnauthorized, gin.H{"error": "Invalid or missing access key"})
+			return
+		}
+	}
+
+	channel := c.DefaultQuery("channel", "")
+	platform := strings.ToLower(strings.TrimSpace(c.Query("platform")))
+	archRaw := strings.ToLower(strings.TrimSpace(c.Query("architecture")))
+	arch := normalizeArchitecture(archRaw)
+	order := strings.ToLower(c.DefaultQuery("order", "desc"))
+	if order != "asc" {
+		order = "desc"
+	}
+	includeStatus := c.Query("include_status") == "1"
+
+	var limit int
+	if _, err := fmt.Sscanf(c.DefaultQuery("limit", "50"), "%d", &limit); err != nil || limit <= 0 {
+		limit = 50
+	}
+	if limit > 500 {
+		limit = 500
+	}
+
+	q := models.DB.Table("app_versions").Where("app_id = ?", appID)
+	if channel != "" {
+		q = q.Where("channel = ?", channel)
+	}
+	if !includeStatus {
+		q = q.Where("status = 1")
+	}
+	if platform != "" {
+		q = q.Where("platform IN ?", platformMatchList(platform))
+	}
+	if arch != "" {
+		q = q.Where("architecture IN ?", archMatchList(arch))
+	}
+
+	var versions []models.AppVersion
+	if err := q.Order("version_code " + strings.ToUpper(order)).Limit(limit).Find(&versions).Error; err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+
+	out := make([]VersionMeta, 0, len(versions))
+	for _, v := range versions {
+		out = append(out, toVersionMeta(c, app, v))
+	}
+
+	c.JSON(http.StatusOK, gin.H{
+		"app_id":   appID,
+		"count":    len(out),
+		"channel":  channel,
+		"platform": platform,
+		"arch":     arch,
+		"order":    order,
+		"limit":    limit,
+		"versions": out,
+	})
+}
+
+// RedirectToGetMeta 旧 /u/:appid 的 301 永久重定向，兼容历史客户端
+func RedirectToGetMeta(c *gin.Context) {
+	target := "/u/getmeta/" + c.Param("appid")
+	if q := c.Request.URL.RawQuery; q != "" {
+		target += "?" + q
+	}
+	c.Redirect(http.StatusMovedPermanently, target)
 }

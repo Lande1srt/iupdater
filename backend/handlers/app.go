@@ -73,10 +73,19 @@ func CreateApp(c *gin.Context) {
 		return
 	}
 
+	// 检查冲突：包括 soft-deleted 的旧记录（SQLite uniqueIndex 会把 soft-deleted 行也算进去）
 	var existing models.App
-	if err := models.DB.Where("app_id = ?", req.AppID).First(&existing).Error; err == nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "App ID already exists"})
-		return
+	if err := models.DB.Unscoped().Where("app_id = ?", req.AppID).First(&existing).Error; err == nil {
+		// 如果已存在且未删除，直接报错
+		if existing.DeletedAt.Time.IsZero() {
+			c.JSON(http.StatusBadRequest, gin.H{"error": "App ID already exists"})
+			return
+		}
+		// soft-deleted 旧记录：物理删干净再创建，避免 UNIQUE 冲突
+		models.DB.Unscoped().Delete(&existing)
+		// 同步清理关联表的软删残留（也物理删）
+		models.DB.Unscoped().Where("app_id = ?", req.AppID).Delete(&models.AppVersion{})
+		models.DB.Unscoped().Where("app_id = ?", req.AppID).Delete(&models.Component{})
 	}
 
 	// 校验 storage_profile_id 有效性
@@ -172,10 +181,14 @@ func DeleteApp(c *gin.Context) {
 		return
 	}
 
-	models.DB.Where("app_id = ?", app.AppID).Delete(&models.AppVersion{})
-	models.DB.Where("app_id = ?", app.AppID).Delete(&models.Component{})
+	// 关联表先物理删除（带软删残留）
+	models.DB.Unscoped().Where("app_id = ?", app.AppID).Delete(&models.AppVersion{})
+	models.DB.Unscoped().Where("app_id = ?", app.AppID).Delete(&models.Component{})
+	// Agent 也要物理删（避免 agent 表 app_id 约束冲突）
+	models.DB.Unscoped().Where("app_id = ?", app.AppID).Delete(&models.Agent{})
 
-	if err := models.DB.Delete(&app).Error; err != nil {
+	// App 本体物理删除（SQLite uniqueIndex 会把 soft-deleted 行也算进去，不能只软删）
+	if err := models.DB.Unscoped().Delete(&app).Error; err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}

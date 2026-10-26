@@ -46,6 +46,28 @@ body {
   @apply w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all duration-200;
 }
 
+/* select 统一箭头：去掉浏览器原生下拉三角，自定义 svg 箭头 */
+select.input,
+select.form-control,
+select[class*="input"],
+select[class*="form-control"] {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' stroke='%236b7280' viewBox='0 0 24 24'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'%3E%3C/path%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 0.625rem center;
+  background-size: 1rem;
+  padding-right: 2.25rem;
+  cursor: pointer;
+}
+
+/* 禁用/只读 select 显示禁用样式但箭头仍可见 */
+select.input:disabled,
+select.form-control:disabled {
+  @apply bg-gray-100 cursor-not-allowed text-gray-400;
+}
+
 .label {
   @apply block text-sm font-medium text-gray-700 mb-1;
 }
@@ -103,21 +125,45 @@ body {
 }
 
 .modal-overlay {
-  @apply fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50;
+  @apply fixed inset-0 bg-black bg-opacity-50 z-50 overflow-y-auto py-8;
+  /* 用 block + text-align:center 让 inline-block 的 modal-content 水平居中 */
+  text-align: center;
+  padding-inline: 1rem;
+  scrollbar-gutter: stable;
+}
+
+/* 窄屏下 overlay 水平内边距缩小 */
+@media (max-width: 420px) {
+  .modal-overlay { padding-inline: 0.5rem; }
 }
 
 .modal-content {
-  @apply bg-white rounded-xl shadow-xl w-full max-w-lg mx-4 max-h-[90vh] overflow-y-auto;
+  @apply bg-white rounded-xl shadow-xl overflow-hidden text-left;
+  /* 默认：display inline-block，宽度由内容撑开；
+     min 保证表单不会太窄，max 保证不会超过视口 */
+  display: inline-block;
+  vertical-align: top;
+  width: auto;
+  min-width: min(420px, 92vw);
+  max-width: min(92vw, 960px);
 }
+
+/* 需要强制拉满的弹窗用下面几个 class（都设 width: 100%） */
+.modal-content.modal-narrow    { width: 100%; max-width: min(60vw, 640px);  }
+.modal-content.modal-wide      { width: 100%; max-width: min(92vw, 1200px); }
+.modal-content.modal-ultrawide { width: 100%; max-width: min(95vw, 1600px); }
 
 .modal-header {
   @apply px-6 py-4 border-b border-gray-100 flex items-center justify-between;
+  flex-shrink: 0;
 }
 
 .modal-body {
   @apply px-6 py-4;
+  max-height: none;
 }
 
 .modal-footer {
   @apply px-6 py-4 border-t border-gray-100 flex justify-end gap-3;
+  flex-shrink: 0;
 }

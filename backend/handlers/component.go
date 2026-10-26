@@ -1,8 +1,9 @@
-﻿package handlers
+package handlers
 
 import (
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -290,6 +291,21 @@ func DeleteComponent(c *gin.Context) {
 	if err := models.DB.First(&component, id).Error; err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "Component not found"})
 		return
+	}
+
+	// 删除后端存储文件
+	app, storageType, storageConfig := resolveAppAndStorage(c, component.AppID)
+	if app != nil && storageType != "" && storageType != "metadata" {
+		if adapter, err := storage.NewStorageAdapter(storageType, storageConfig); err == nil {
+			key := stripDownloadKey(component.DownloadURL)
+			if key != "" {
+				if err := adapter.Delete(key); err != nil {
+					log.Printf("[DeleteComponent] 存储文件删除失败 key=%s: %v (继续删除数据库记录)", key, err)
+				} else {
+					log.Printf("[DeleteComponent] 存储文件已删除 key=%s", key)
+				}
+			}
+		}
 	}
 
 	if err := models.DB.Delete(&component).Error; err != nil {

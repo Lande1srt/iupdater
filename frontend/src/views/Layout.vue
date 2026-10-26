@@ -33,6 +33,17 @@
           </svg>
           <span class="font-medium">存储管理</span>
         </router-link>
+
+        <router-link
+          to="/agents"
+          class="flex items-center gap-3 px-4 py-3 rounded-lg mb-1 transition-colors"
+          :class="isActive('/agents') ? 'bg-primary-50 text-primary-600' : 'text-gray-600 hover:bg-gray-50'"
+        >
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+          </svg>
+          <span class="font-medium">助手管理</span>
+        </router-link>
       </nav>
 
       <div class="absolute bottom-0 left-0 right-0 p-4 border-t border-gray-100">

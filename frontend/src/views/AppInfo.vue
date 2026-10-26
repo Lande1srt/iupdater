@@ -123,6 +123,103 @@
         </div>
       </div>
 
+      <!-- 下载链接生成器 -->
+      <div class="card">
+        <div class="card-header">
+          <h3 class="text-lg font-semibold">最新版本下载链接</h3>
+        </div>
+        <div class="card-body space-y-4">
+          <p class="text-sm text-gray-500">
+            按不同平台/架构生成公开访问的最新版本直链（302 重定向）或元数据 JSON。多平台版本组必须选择 platform 参数。
+          </p>
+
+          <!-- 生成器控制条 -->
+          <div class="bg-gray-50 rounded-lg p-4">
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <div>
+                <label class="text-xs font-medium text-gray-500 block mb-1">发布渠道</label>
+                <select v-model="linkChannel" class="form-control">
+                  <option value="stable">stable 正式</option>
+                  <option value="beta">beta 测试</option>
+                  <option value="dev">dev 开发</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-gray-500 block mb-1">平台</label>
+                <select v-model="linkPlatform" class="form-control">
+                  <option value="">自动（仅单平台版本可用）</option>
+                  <option value="all">all</option>
+                  <option value="windows">windows</option>
+                  <option value="linux">linux</option>
+                  <option value="darwin">darwin</option>
+                  <option value="android">android</option>
+                  <option value="ios">ios</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-xs font-medium text-gray-500 block mb-1">架构</label>
+                <select v-model="linkArch" class="form-control">
+                  <option value="">自动</option>
+                  <option value="all">all</option>
+                  <option value="x86_64">x86_64</option>
+                  <option value="amd64">amd64</option>
+                  <option value="aarch64">aarch64</option>
+                  <option value="arm64">arm64</option>
+                  <option value="i386">i386</option>
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <!-- 链接输出 -->
+          <div class="space-y-3">
+            <!-- getlink 302 -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-xs font-medium text-gray-600">① 直接下载（302 重定向）</label>
+                <button @click="copyText(publicLink('getlink'))" class="btn btn-xs btn-secondary">复制</button>
+              </div>
+              <code class="block bg-gray-900 text-green-300 px-3 py-2 rounded text-xs font-mono break-all select-all">{{ publicLink('getlink') }}</code>
+            </div>
+
+            <!-- 最新版本元数据 JSON -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-xs font-medium text-gray-600">② 最新版本元数据</label>
+                <button @click="copyText(publicLink('info'))" class="btn btn-xs btn-secondary">复制</button>
+              </div>
+              <code class="block bg-gray-900 text-green-300 px-3 py-2 rounded text-xs font-mono break-all select-all">{{ publicLink('info') }}</code>
+            </div>
+
+            <!-- 带 Access Key -->
+            <div v-if="app?.enable_auth">
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-xs font-medium text-orange-600">③ 带 Access Key 版本</label>
+                <button @click="copyText(publicLink('info', true))" class="btn btn-xs bg-orange-50 text-orange-700 hover:bg-orange-100">复制</button>
+              </div>
+              <code class="block bg-orange-50 text-orange-900 border border-orange-200 px-3 py-2 rounded text-xs font-mono break-all select-all">{{ publicLink('info', true) }}</code>
+            </div>
+
+            <!-- 列出全部版本元数据（新） -->
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-xs font-medium text-gray-600">④ 列出所有版本元数据</label>
+                <button @click="copyText(publicLink('listmeta'))" class="btn btn-xs btn-secondary">复制</button>
+              </div>
+              <code class="block bg-gray-900 text-green-300 px-3 py-2 rounded text-xs font-mono break-all select-all">{{ publicLink('listmeta') }}</code>
+            </div>
+          </div>
+
+          <!-- 多平台警告 -->
+          <div v-if="!linkPlatform && !linkArch" class="bg-yellow-50 border border-yellow-200 rounded p-3">
+            <div class="text-xs text-yellow-800">
+              ⚠ 未选择 platform / architecture 参数时，若最新版本组只有一个平台会直接返回；
+              若包含多平台，接口返回 <code class="bg-yellow-100 px-1 rounded">409 Conflict</code> 并提示所有可用平台，请在上表选择 platform。
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 存储配置 -->
       <div class="card">
         <div class="card-header">
@@ -243,6 +340,44 @@ const app = ref(null)
 const loading = ref(true)
 const showAccessKey = ref(false)
 const copied = ref(false)
+
+// 下载链接生成器状态
+const linkChannel = ref('stable')
+const linkPlatform = ref('')
+const linkArch = ref('')
+
+// 通过 window.location 取主控绝对 URL（前端是主控静态文件，同源）
+const siteOrigin = computed(() => window.location.origin)
+
+function buildQuery(includeAccessKey) {
+  const params = new URLSearchParams()
+  if (linkChannel.value && linkChannel.value !== 'stable') params.set('channel', linkChannel.value)
+  if (linkPlatform.value) params.set('platform', linkPlatform.value)
+  if (linkArch.value) params.set('architecture', linkArch.value)
+  if (includeAccessKey && app.value?.access_key) params.set('access_key', app.value.access_key)
+  const q = params.toString()
+  return q ? '?' + q : ''
+}
+
+function publicLink(kind, includeAccessKey = false) {
+  if (!app.value) return '...'
+  const appid = encodeURIComponent(app.value.app_id)
+  let path
+  switch (kind) {
+    case 'getlink':  path = `/u/getlink/${appid}`; break       // 302 重定向下载
+    case 'listmeta': path = `/u/listmeta/${appid}`; break      // 列出所有版本元数据
+    default:         path = `/u/getmeta/${appid}`              // 最新版本元数据 JSON（重写旧 /u/:appid）
+  }
+  return siteOrigin.value + path + buildQuery(includeAccessKey)
+}
+
+function copyText(text) {
+  navigator.clipboard.writeText(text).then(() => {
+    success('已复制到剪贴板')
+  }).catch(err => {
+    error('复制失败：' + err.message)
+  })
+}
 
 const storageProfileConfig = computed(() => {
   if (!app.value?.storage_profile?.config) return null

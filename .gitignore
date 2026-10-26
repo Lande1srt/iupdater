@@ -118,3 +118,7 @@ tramp
 *.tar.gz
 *.rar
 *.7z
+/agent/check
+agent/agent-linux-arm64
+agent/agent-linux-amd64
+*.exe

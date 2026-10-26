@@ -1,226 +1,203 @@
-# iUpdater - 通用程序版本更新器
+# iUpdater
 
-基于 Go + Vue3 开发的通用程序版本更新服务，支持多应用、多渠道、多平台的版本管理和组件包分发。
+通用程序版本更新管理服务 + 跨主机辅助更新助手。
+
+一个主控后端（Go + Vue3），多个 agent 助手（Go，零依赖，单二进制），适合管理分布式部署的服务器程序的灰度版本更新。
+
 
 ## 功能特性
 
-- **多应用管理**: 支持管理多个应用，每个应用独立配置
-- **双渠道发布**: 正式版(stable) / 测试版(beta) 双渠道
-- **多平台架构**: 支持 Windows / macOS / Linux / Android / iOS，支持 x86_64 / arm64 等架构
-- **日期序号版本号**: 可读的纯数字版本号（YYYYMMDDXXXX）
-- **强制更新**: 支持标记强制更新版本
-- **完整包与组件包**: 支持完整安装包和分散组件包两种分发模式
-- **哈希校验**: 自动计算文件 SHA256 哈希值，确保文件完整性
-- **多存储策略**: 每个应用可独立选择存储策略（S3 / WebDAV / 元数据）
-- **系统代理转发**: WebDAV 统一通过系统代理下载，S3 可选代理或直连
-- **访问校验**: 应用级 AccessKey 鉴权，未授权返回 401
-- **文件探针**: 元数据模式下支持探测远程文件大小（HEAD 请求）
-- **现代化 UI**: Vue3 + Tailwind CSS 构建的扁平化管理后台
-- **一体化编译**: Go embed 嵌入前端资源，单文件部署
-- **Rust Demo 客户端**: egui 构建的跨平台测试客户端
+### 主控后端
+
+- **多应用管理**：每个应用独立 AppID、多 Channel（stable / beta）、多 Platform（win / linux / mac / all）、多 Architecture（amd64 / arm64 / all）
+- **日期序号版本号**：`YYYYMMDDXXXX`，每天最多 9999 个版本，可读性强
+- **强制更新标记**：客户端可判断是否必须升级
+- **完整包 + 组件包**：两种分发模式
+- **哈希校验 + 文件大小**：自动计算 SHA256，下载前校验
+- **多存储策略（通过复用存储档案）**：
+  - **S3 兼容对象存储**：阿里云 OSS、腾讯云 COS、AWS S3、MinIO、Cloudflare R2；支持 Virtual-Hosted / Path-Style 路径风格切换；可配置外部 CDN 加速域名（Redirect + CDN 直连）
+  - **WebDAV**：系统代理转发，不暴露凭证
+  - **元数据模式**：文件链接外部托管
+  - 多个 App 可以复用同一个 StorageProfile，各自覆盖 base_path
+- **访问校验**：应用级 AccessKey 鉴权，未授权返回 401
+- **TOTP 两步验证（可选）**：配置 `TOTP_SECRET` 后强制两步登录，密码正确才进入 TOTP 环节；未配置则单步登录
+- **辅助更新助手（Agent）管理**：
+  - 注册 agent，生成唯一 Access Key（32 字符 hex）
+  - 查看各 agent 实时状态（state / hostname / 当前版本 / 上次 checkin）
+  - 远程控制：立即检查更新 / 重启 agent / 下发远程配置覆盖
+  - agent 下一次 checkin 时自动领取控制指令，执行后主控自动清空
+- **公共查询 API**：`/u/:appid` 返回 JSON，`/u/getlink/:appid` 302 重定向
+- **完整下载代理**：`/api/download/*filekey`，跟随 302，支持 S3 直连 / 主控代理
+
+### Agent 辅助更新助手
+
+- **零依赖单二进制**：Go 静态编译，不依赖任何系统库
+- **主动轮询**：可配置间隔（默认 60s）checkin 主控
+- **完整更新流程**：stop → SHA256 校验 → 备份 → 解压 → 原子覆盖 → start
+- **安全回滚**：覆盖任何步骤失败自动从备份还原，保留最近 5 个
+- **shell 命令支持**：`stop_command` / `start_command` 完整终端命令（支持 `/in1panel/go/linux-amd64/run.sh stop`、`systemctl restart myapp`、`pkill -f xx; sleep 2` 等）
+- **远程配置 merge**：主控下发 `config_patch`，agent 自动合并写入本地 `config.json` 并生效
+- **本地状态面板**：`http://127.0.0.1:18080`，实时状态 / 进度 / 最近 200 行日志 / 手动检查
+- **配置验证器**：独立 `agent-check` 小工具，检查 JSON 语法、主控连通性、真实 checkin、本地脚本可执行性
+- **Linux 启动脚本**：`run.sh` start/stop/restart/status/check + systemd 服务模板注释
 
 ## 技术栈
 
-**后端**:
-- Go 1.21+
-- Gin Web 框架
-- GORM + SQLite
-- JWT 认证
-- Go embed（前端资源嵌入）
-
-**前端**:
-- Vue 3 + Composition API
-- Vite
-- Tailwind CSS
-- Pinia 状态管理
-- Vue Router
-- Axios
-
-**Demo 测试客户端**:
-- Rust
-- egui (eframe)
-- reqwest
-- tokio
+| 模块 | 技术 |
+|---|---|
+| 主控后端 | Go 1.24 / Gin / GORM + SQLite / JWT / TOTP (pquerna/otp) / AWS SDK v2 / Go embed |
+| 前端 UI | Vue 3 + Composition API / Vite / Tailwind CSS / Pinia / Axios |
+| Agent 助手 | Go 1.24，**零外部依赖**（仅标准库 + embed） |
+| 验证器 | Go 1.24，独立子模块 |
 
 ## 快速开始
 
 ### 环境要求
 
-- Go 1.21+
-- Node.js 18+
-- npm 或 yarn
+- Go 1.24+
+- Node.js 18+ （仅开发前端）
 
-### 一体化编译（推荐）
+### 一键编译（Windows）
 
-一键编译前端和后端，生成独立的可执行文件：
-
-**Windows (PowerShell)**:
 ```powershell
-.\build.ps1
+./build.ps1
 ```
 
-**Windows (CMD)**:
-```bat
-build.bat
-```
-
-编译完成后，可执行文件位于 `backend\iupdater.exe`，直接运行即可。
+产出物：`backend/iupdater.exe`（单二进制，内嵌前端 dist）。
 
 ### 开发模式
 
-#### 后端启动
-
-```bash
+```powershell
+# 后端
 cd backend
-
-# 复制配置文件
-copy .env.example .env
-
-# 安装依赖
+cp .env.example .env     # 改 PORT / ADMIN_USER / ADMIN_PASS / TOTP_SECRET
 go mod tidy
+go run .
 
-# 构建
-go build -o iupdater.exe .
-
-# 运行
-./iupdater.exe
-```
-
-后端默认监听 `:8080` 端口。
-
-### 前端启动
-
-```bash
+# 前端（另一个终端，已配 vite proxy 到后端）
 cd frontend
-
-# 安装依赖
 npm install
-
-# 开发模式
 npm run dev
-
-# 生产构建
-npm run build
 ```
-
-前端开发服务器默认运行在 `http://localhost:5173`，已配置代理转发 API 请求到后端。
 
 ### 默认账号
 
-- 用户名: `admin`
-- 密码: `admin123`
+| 变量 | 默认值 |
+|---|---|
+| ADMIN_USER | `admin` |
+| ADMIN_PASS | `admin123` |
+| JWT_SECRET | `iupdater-secret-key-change-in-production` |
+| PORT | `8080` |
 
-可通过环境变量 `ADMIN_USER` 和 `ADMIN_PASS` 修改。
+## 配置
 
-## 配置说明
+### 主控后端环境变量
 
-### 环境变量
+| 变量 | 默认 | 说明 |
+|---|---|---|
+| `PORT` | `8080` | 监听端口 |
+| `DB_PATH` | `data/iupdater.db` | SQLite 路径 |
+| `ADMIN_USER` / `ADMIN_PASS` | `admin` / `admin123` | 管理员登录凭证 |
+| `JWT_SECRET` | iupdater-secret-key-change-in-production | JWT 签名密钥，**生产必须改** |
+| `TOTP_SECRET` | 空（不启用） | TOTP 两步验证秘钥（Base32）；设置后登录强制两步 |
 
-| 变量 | 默认值 | 说明 |
-|------|--------|------|
-| PORT | 8080 | 服务监听端口 |
-| ADMIN_USER | admin | 管理员用户名 |
-| ADMIN_PASS | admin123 | 管理员密码 |
-| JWT_SECRET | iupdater-secret-key-change-in-production | JWT 密钥，生产环境请修改 |
-| DB_PATH | data/iupdater.db | SQLite 数据库文件路径 |
+### Agent 配置
 
-### 存储策略配置
+Agent 配置为 JSON 文件（默认与 agent 二进制同目录 `config.json`），完整字段与示例见 [agent/CONFIG.md](agent/CONFIG.md)。
 
-每个应用可独立配置存储策略，在管理后台图形化配置，无需手动编辑 JSON。
+核心字段：
 
-#### 1. 元数据模式
+```json
+{
+  "server_url": "http://主控服务器:8080",
+  "access_key": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",  // 主控注册 agent 后生成
+  "app_id": "com.test.myapp",
+  "channel": "stable",
+  "poll_interval_seconds": 60,
+  "target_dir": "./app",
+  "stop_command":  "/in1panel/go/linux-amd64/run.sh stop",
+  "start_command": "/in1panel/go/linux-amd64/run.sh start",
+  "api_port": 18080
+}
+```
 
-仅存储版本元数据，文件下载链接手动填写外部地址，适合文件托管在第三方平台的场景。
+### S3 路径风格
 
-- 发布版本时填写外部下载链接
-- 可选填写文件大小和 SHA256 哈希
-- 支持一键探测远程文件大小（HTTP HEAD 请求）
-- 下载时直接使用外部链接，不经过系统转发
+阿里云 OSS / 腾讯云 COS / AWS S3 / Cloudflare R2 / 七牛 → **Virtual-Hosted（默认）**
+MinIO / Ceph / 自建 S3 → **Path-Style**
 
-#### 2. S3 兼容对象存储
+前端在「存储档案」表单里选择，后端自动切换。
 
-支持阿里云 OSS、腾讯云 COS、MinIO 等 S3 兼容存储。
+### 存储档案复用
 
-配置项：
-- **Endpoint**: S3 服务地址
-- **Access Key**: 访问密钥
-- **Secret Key**: 密钥
-- **Bucket**: 存储桶
-- **Region**: 区域
-- **下载方式**: 外部 CDN 直连 / 系统代理转发
-  - 外部 CDN 直连：配置 CDN 基础 URL，客户端直接访问 CDN
-  - 系统代理转发：下载请求通过本系统代理，隐藏存储服务地址
+一个 StorageProfile（S3 或 WebDAV）可被多个 App 复用，App 自己通过 `storage_path` 覆盖档案的 `base_path`。
 
-#### 3. WebDAV 存储
+## Agent 远程控制（主控下发）
 
-配置项：
-- **URL**: WebDAV 服务地址
-- **用户名**: 账号
-- **密码**: 密码
-- **基础路径**: 远程目录路径
+主控管理端「助手管理 → ⚙」弹窗支持：
 
-下载方式：统一通过系统代理转发，不暴露 WebDAV 地址和凭证。
+- **立即检查更新**（`check_now`）：agent 下次 poll 跳过间隔立即执行 checkin
+- **重启 agent**（`restart`）：让 agent 自身重启动（完整重启建议外部 systemd/NSSM）
+- **远程配置覆盖**（`config_patch`）：JSON patch，agent merge 写入本地 config.json 后自动生效，**无需登录目标服务器**
 
-### 访问校验
+控制指令在 agent 下一次 checkin 时领取，领取后主控立即清空。
 
-每个应用可独立启用访问校验：
-- 启用后自动生成 16 位随机 AccessKey
-- 客户端请求 `/api/check-update` 必须携带 `access_key`
-- 未携带或错误的 AccessKey 返回 401 Unauthorized
+## API 路由速查
 
-## 版本号规则
+### 公共（无需认证）
 
-采用可读的日期序号格式：`YYYYMMDDXXXX`
+| 方法 | 路由 | 说明 |
+|---|---|---|
+| GET | `/u/:appid` | 返回最新版本 JSON |
+| GET | `/u/getlink/:appid` | 302 重定向到最终下载链接 |
+| GET | `/api/login/config` | 返回 `{totp_enabled: bool}` |
+| POST | `/api/login` | 用户名密码 + 可选 TOTP code |
+| POST | `/api/check-update` | 传统方式检查更新（携带 access_key） |
+| GET | `/api/download/*filekey` | S3/WebDAV 代理下载 |
 
-- **前 8 位**: 年月日，如 `20260705`
-- **后 4 位**: 当天序号，从 `0001` 开始递增
+### Agent 侧（Bearer agent_access_key）
 
-示例：
-- 2026年7月5日第1个版本: `202607050001`
-- 2026年7月5日第100个版本: `202607050100`
-- 2026年7月6日第1个版本: `202607060001`
+| 方法 | 路由 | 说明 |
+|---|---|---|
+| POST | `/api/agent/checkin` | 上报状态 + 拉取更新任务 + 领取远程 command / config_patch |
+| POST | `/api/agent/report` | 上报更新结果（success / fail） |
 
-## API 文档
+### 管理端（JWT）
 
-详细的 API 文档请参考 [API 文档](docs/API.md)
+| 方法 | 路由 | 说明 |
+|---|---|---|
+| POST | `/api/admin/agents` | 注册新 agent（返回唯一 access_key） |
+| GET | `/api/admin/agents` | 列表（含实时 status_json / pending_command） |
+| GET | `/api/admin/agents/:id` | 详情 |
+| PUT | `/api/admin/agents/:id` | 编辑 / 重置 access_key |
+| DELETE | `/api/admin/agents/:id` | 删除（**物理删除，清干净关联表**） |
+| POST | `/api/admin/agents/:id/control` | 下发 command 或 config_patch |
+| /api/admin/apps | 应用 CRUD |  |
+| /api/admin/storage-profiles | 存储档案 CRUD + 连通性检查 |  |
+| /api/admin/versions | 版本 CRUD + 上传 + 探针 |  |
+| /api/admin/components | 组件 CRUD + 上传 |  |
 
-### 核心接口
-
-**公共接口**:
-- `POST /api/check-update` - 检查更新
-- `GET /api/download/*` - 下载代理（S3 代理/WebDAV 代理）
-
-**管理接口**（需认证）:
-- `POST /api/login` - 登录
-- `GET/POST/PUT/DELETE /api/admin/apps` - 应用管理
-- `GET/POST/PUT/DELETE /api/admin/versions` - 版本管理
-- `POST /api/admin/versions/upload` - 上传版本文件
-- `POST /api/admin/versions/probe` - 探针获取文件大小
-- `PUT /api/admin/versions/:id/status` - 更新版本状态
-- `GET/POST/PUT/DELETE /api/admin/components` - 组件管理
-- `POST /api/admin/components/upload` - 上传组件文件
-- `PUT /api/admin/components/:id/status` - 更新组件状态
-
-## Demo 测试客户端
-
-Rust + egui 构建的跨平台测试客户端，用于测试更新接口。
-
-### 功能
-
-- 配置服务器地址、App ID、版本号、AccessKey
-- 渠道切换（正式版/测试版）
-- 完整包信息展示
-- 组件列表与本地版本对比
-- 选项卡切换查看完整包和组件
-- 下载链接一键复制
-
-### 编译运行
+## Linux 服务器部署（Agent）
 
 ```bash
-cd demo
-cargo build --release
-./target/release/iupdater-demo.exe
+scp agent-linux-amd64 run.sh config.json server:/opt/myapp/
+cd /opt/myapp
+mv agent-linux-amd64 agent
+chmod +x agent run.sh
+
+# 先验一下
+./run.sh check
+
+# 启动
+./run.sh start
+
+# (可选) systemd 开机自启
+# 按 run.sh 顶部注释复制 /etc/systemd/system/iupdater-agent.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now iupdater-agent
 ```
+
+完整说明见 [agent/CONFIG.md](agent/CONFIG.md)。
 
 ## 许可证
 

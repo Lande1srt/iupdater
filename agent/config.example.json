@@ -1,0 +1,18 @@
+{
+  "server_url": "http://192.168.1.100:8080",
+  "access_key": "",
+  "poll_interval_seconds": 60,
+  "app_id": "com.test.myapp",
+  "channel": "stable",
+  "platform": "linux",
+  "architecture": "amd64",
+  "target_dir": "./app",
+  "backup_dir": "./backup",
+  "download_dir": "./download",
+  "backup_keep": 5,
+
+  "stop_command": "",
+  "start_command": "",
+
+  "api_port": 18080
+}

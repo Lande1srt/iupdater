@@ -15,8 +15,11 @@ func SetupRoutes(r *gin.Engine) {
 	r.Static("/uploads", "./data/uploads")
 
 	// 公开版本查询（无需认证）
-	r.GET("/u/:appid", handlers.GetLatestVersion)
-	r.GET("/u/getlink/:appid", handlers.GetLatestLink)
+	r.GET("/u/getmeta/:appid", handlers.GetMeta)        // 最新版本元数据（重写原 /u/:appid）
+	r.GET("/u/listmeta/:appid", handlers.ListMeta)      // 列出该 app 所有版本元数据
+	r.GET("/u/getlink/:appid", handlers.GetLatestLink)  // 302 重定向到最新下载
+	// 保留 /u/:appid 做兼容重定向（返回 301 → /u/getmeta/:appid）
+	r.GET("/u/:appid", handlers.RedirectToGetMeta)
 
 	api := r.Group("/api")
 	{
@@ -24,6 +27,10 @@ func SetupRoutes(r *gin.Engine) {
 		api.POST("/login", handlers.Login)
 		api.POST("/check-update", handlers.CheckUpdate)
 		api.GET("/download/*filekey", handlers.ProxyDownload)
+
+		// Agent 辅助更新助手 API（Bearer access_key 鉴权）
+		api.POST("/agent/checkin", handlers.AgentCheckin)
+		api.POST("/agent/report", handlers.AgentReport)
 
 		admin := api.Group("/admin")
 		admin.Use(middleware.AuthMiddleware())
@@ -43,6 +50,7 @@ func SetupRoutes(r *gin.Engine) {
 			admin.DELETE("/apps/:id", handlers.DeleteApp)
 
 			admin.GET("/versions", handlers.GetVersions)
+			admin.GET("/versions/groups", handlers.GetVersionGroups)
 			admin.GET("/versions/:id", handlers.GetVersion)
 			admin.POST("/versions", handlers.CreateVersion)
 			admin.POST("/versions/upload", handlers.UploadVersionFile)
@@ -58,6 +66,15 @@ func SetupRoutes(r *gin.Engine) {
 			admin.DELETE("/components/:id", handlers.DeleteComponent)
 
 			admin.POST("/storage/check", handlers.CheckStorageConnection)
+
+			// Agent 管理
+			admin.POST("/agents", handlers.RegisterAgent)
+			admin.GET("/agents", handlers.GetAgents)
+			admin.GET("/agents/:id", handlers.GetAgent)
+			admin.PUT("/agents/:id", handlers.UpdateAgent)
+			admin.DELETE("/agents/:id", handlers.DeleteAgent)
+			admin.POST("/agents/:id/control", handlers.AgentControl)
+			admin.POST("/agents/:id/clear-error", handlers.ClearAgentError)
 		}
 	}
 

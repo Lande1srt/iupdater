@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>iUpdater Agent</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; }
+    .log-line { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; line-height: 1.6; }
+    .progress-bar { transition: width 0.3s ease; }
+    .pulse-dot { animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+  </style>
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen">
+  <div class="max-w-3xl mx-auto p-6">
+    <!-- Header -->
+    <div class="flex items-center justify-between mb-6">
+      <div class="flex items-center gap-3">
+        <div class="w-10 h-10 rounded-xl bg-gradient-to-br from-sky-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-sky-900/40">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+        </div>
+        <div>
+          <h1 class="text-xl font-bold tracking-tight">iUpdater Agent</h1>
+          <p class="text-xs text-slate-400">自动更新辅助助手 · 守护你的服务</p>
+        </div>
+      </div>
+      <div id="status-badge" class="flex items-center gap-2 px-3 py-1.5 rounded-full bg-slate-800 text-sm">
+        <span class="w-2 h-2 rounded-full bg-slate-400 pulse-dot" id="status-dot"></span>
+        <span id="status-text">加载中...</span>
+      </div>
+    </div>
+
+    <!-- Status Card -->
+    <div class="bg-slate-800/60 backdrop-blur rounded-2xl p-6 border border-slate-700/60 shadow-xl">
+      <div class="grid grid-cols-2 gap-4 mb-5">
+        <div>
+          <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">当前版本</div>
+          <div class="text-2xl font-bold text-white" id="current-version">--</div>
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">任务 ID</div>
+          <div class="text-sm font-mono text-slate-300 truncate" id="task-id" title="--">--</div>
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">上次检查</div>
+          <div class="text-sm text-slate-300" id="last-check">--</div>
+        </div>
+        <div>
+          <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">上次更新</div>
+          <div class="text-sm text-slate-300" id="last-update">--</div>
+        </div>
+      </div>
+
+      <!-- Progress (only visible while active) -->
+      <div id="progress-box" class="hidden mb-5">
+        <div class="flex items-center justify-between text-xs text-slate-400 mb-1.5">
+          <span id="progress-label">下载进度</span>
+          <span id="progress-pct">0%</span>
+        </div>
+        <div class="h-2 bg-slate-700 rounded-full overflow-hidden">
+          <div id="progress-bar" class="progress-bar h-full bg-gradient-to-r from-sky-400 to-indigo-500 rounded-full" style="width:0%"></div>
+        </div>
+      </div>
+
+      <!-- Error -->
+      <div id="error-box" class="hidden mb-4 p-3 rounded-lg bg-red-900/30 border border-red-700/50">
+        <div class="text-red-300 text-sm font-semibold mb-0.5">错误信息</div>
+        <div id="error-msg" class="text-red-200 text-xs break-all"></div>
+      </div>
+
+      <!-- Actions -->
+      <div class="flex gap-3">
+        <button id="btn-check" class="flex-1 py-2.5 px-4 rounded-lg bg-sky-600 hover:bg-sky-500 active:bg-sky-700 text-white font-medium transition-colors shadow shadow-sky-900/30 flex items-center justify-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+          立即检查
+        </button>
+        <button id="btn-reload-logs" class="py-2.5 px-4 rounded-lg bg-slate-700 hover:bg-slate-600 text-slate-100 font-medium transition-colors flex items-center justify-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+          刷新日志
+        </button>
+      </div>
+    </div>
+
+    <!-- Logs Panel -->
+    <div class="mt-6 bg-slate-800/60 backdrop-blur rounded-2xl border border-slate-700/60 overflow-hidden shadow-xl">
+      <div class="flex items-center justify-between px-5 py-3 border-b border-slate-700/60">
+        <div class="flex items-center gap-2">
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4 text-slate-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          <span class="font-semibold text-sm">运行日志</span>
+          <span class="text-xs text-slate-500" id="log-count"></span>
+        </div>
+        <div class="flex items-center gap-2">
+          <label class="flex items-center gap-1.5 text-xs text-slate-400 cursor-pointer">
+            <input type="checkbox" id="auto-scroll" checked class="accent-sky-500" /> 自动滚到底
+          </label>
+        </div>
+      </div>
+      <div id="log-container" class="log-line max-h-80 overflow-y-auto p-4 bg-slate-950/60"></div>
+    </div>
+
+    <div class="text-center text-xs text-slate-500 mt-6">
+      每 3 秒自动刷新状态 · iUpdater Agent Local Panel
+    </div>
+  </div>
+
+<script>
+(function () {
+  const stateLabel = {
+    'idle':       { text: '空闲',       dot: 'bg-slate-400',      progress: false, isActive: false },
+    'checking':   { text: '检查中',     dot: 'bg-yellow-400',    progress: false, isActive: true  },
+    'downloading':{ text: '下载中',     dot: 'bg-sky-400',       progress: true,  isActive: true  },
+    'updating':   { text: '更新中',     dot: 'bg-indigo-400',    progress: true,  isActive: true  },
+    'success':    { text: '上次成功',   dot: 'bg-emerald-400',   progress: false, isActive: false },
+    'fail':       { text: '上次失败',   dot: 'bg-red-500',       progress: false, isActive: false }
+  };
+
+  const $ = id => document.getElementById(id);
+  const fmt = ts => {
+    if (!ts) return '--';
+    // 后端返回 time.Time JSON 带 Z
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return ts;
+    const pad = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+  };
+
+  // 状态刷新
+  async function refreshStatus() {
+    try {
+      const resp = await fetch('/api/status', { cache: 'no-store' });
+      if (!resp.ok) return;
+      const s = await resp.json();
+
+      const conf = stateLabel[s.state] || stateLabel['idle'];
+      $('status-text').textContent = conf.text;
+      $('status-dot').className = 'w-2 h-2 rounded-full ' + conf.dot + (conf.isActive ? ' pulse-dot' : '');
+
+      $('current-version').textContent = s.current_version || '--';
+      $('task-id').textContent = s.task_id || '--';
+      $('task-id').title = s.task_id || '--';
+      $('last-check').textContent = fmt(s.last_check_at);
+      $('last-update').textContent = fmt(s.last_update_at);
+
+      // 进度条
+      const pb = $('progress-box');
+      if (conf.progress && s.progress >= 0) {
+        pb.classList.remove('hidden');
+        $('progress-bar').style.width = s.progress + '%';
+        $('progress-pct').textContent = s.progress + '%';
+        $('progress-label').textContent = s.state === 'downloading' ? '下载进度' : '更新进度';
+      } else {
+        pb.classList.add('hidden');
+      }
+
+      // 错误
+      const eb = $('error-box');
+      if (s.error) {
+        eb.classList.remove('hidden');
+        $('error-msg').textContent = s.error;
+      } else {
+        eb.classList.add('hidden');
+      }
+    } catch (e) {
+      // 忽略网络错误（刚启动时服务可能未就绪）
+    }
+  }
+
+  // 日志刷新
+  async function refreshLogs() {
+    try {
+      const resp = await fetch('/api/logs', { cache: 'no-store' });
+      if (!resp.ok) return;
+      const entries = await resp.json();
+      const container = $('log-container');
+      const autoScroll = $('auto-scroll').checked;
+      const prevScrollBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+
+      container.innerHTML = entries.map(e => {
+        const levelCls = {
+          'INFO': 'text-slate-300',
+          'WARN': 'text-yellow-300',
+          'ERROR': 'text-red-400',
+          'DEBUG':'text-slate-500'
+        }[e.level] || 'text-slate-400';
+        return `<div class="log-line ${levelCls}"><span class="text-slate-500">${fmt(e.time)}</span> <span class="font-semibold">[${e.level}]</span> ${escapeHtml(e.msg)}</div>`;
+      }).join('');
+
+      $('log-count').textContent = entries.length + ' 条';
+
+      if (autoScroll || prevScrollBottom < 40) {
+        container.scrollTop = container.scrollHeight;
+      }
+    } catch (e) {}
+  }
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+  }
+
+  // 手动检查
+  $('btn-check').addEventListener('click', async () => {
+    $('btn-check').disabled = true;
+    $('btn-check').classList.add('opacity-60', 'cursor-not-allowed');
+    try {
+      const resp = await fetch('/api/checknow', { method: 'POST' });
+      const data = await resp.json().catch(() => ({}));
+      if (data.ok === false && data.message) {
+        alert(data.message);
+      }
+      await refreshStatus();
+    } finally {
+      $('btn-check').disabled = false;
+      $('btn-check').classList.remove('opacity-60', 'cursor-not-allowed');
+    }
+  });
+
+  $('btn-reload-logs').addEventListener('click', refreshLogs);
+
+  // 启动
+  refreshStatus();
+  refreshLogs();
+  setInterval(refreshStatus, 3000);
+  setInterval(refreshLogs, 2000);
+})();
+</script>
+</body>
+</html>

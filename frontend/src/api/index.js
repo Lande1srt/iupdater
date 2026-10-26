@@ -36,6 +36,10 @@ export function getVersions(params) {
   return request.get('/admin/versions', { params })
 }
 
+export function getVersionGroups(params) {
+  return request.get('/admin/versions/groups', { params })
+}
+
 export function getVersion(id) {
   return request.get(`/admin/versions/${id}`)
 }
@@ -115,4 +119,38 @@ export function deleteStorageProfile(id) {
 
 export function checkStorageProfileConnection(id) {
   return request.post(`/admin/storage-profiles/${id}/check`)
+}
+
+// ============ Agent 辅助更新助手 ============
+export function getAgents() {
+  return request.get('/admin/agents')
+}
+
+export function getAgent(id) {
+  return request.get(`/admin/agents/${id}`)
+}
+
+export function createAgent(data) {
+  return request.post('/admin/agents', data)
+}
+
+export function updateAgent(id, data) {
+  return request.put(`/admin/agents/${id}`, data)
+}
+
+export function deleteAgent(id) {
+  return request.delete(`/admin/agents/${id}`)
+}
+
+// 远程控制: command = check_now | restart | heartbeat
+export function controlAgent(id, command, configPatch) {
+  return request.post(`/admin/agents/${id}/control`, {
+    command: command || '',
+    config_patch: configPatch || null
+  })
+}
+
+// 手动清除 agent 的错误状态（last_result / last_message / status_json.error）
+export function clearAgentError(id) {
+  return request.post(`/admin/agents/${id}/clear-error`)
 }

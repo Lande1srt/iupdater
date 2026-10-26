@@ -23,7 +23,7 @@ func InitDB() error {
 		return err
 	}
 
-	err = DB.AutoMigrate(&App{}, &AppVersion{}, &Component{}, &StorageConfig{}, &StorageProfile{})
+	err = DB.AutoMigrate(&App{}, &AppVersion{}, &Component{}, &StorageConfig{}, &StorageProfile{}, &Agent{})
 	if err != nil {
 		return err
 	}
