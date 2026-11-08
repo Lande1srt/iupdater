@@ -46,6 +46,11 @@ const routes = [
         path: 'agents',
         name: 'Agents',
         component: () => import('../views/AgentList.vue')
+      },
+      {
+        path: 'api-keys',
+        name: 'APIKeys',
+        component: () => import('../views/ApiKeyList.vue')
       }
     ]
   }

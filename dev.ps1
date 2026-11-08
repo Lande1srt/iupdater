@@ -7,6 +7,8 @@ $ErrorActionPreference = "Continue"
 $ProjectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 Set-Location $ProjectRoot
 
+$BackendPort = 8081
+$FrontendPort = 5173
 $backendDir = Join-Path $ProjectRoot "backend"
 $frontendDir = Join-Path $ProjectRoot "frontend"
 $backendProc = $null
@@ -49,8 +51,8 @@ Write-Host ""
 Write-Host "[2/5] Preparing backend configuration..." -ForegroundColor Yellow
 
 # 端口冲突检测
-Write-Host "  Checking ports 8080 and 5173..." -ForegroundColor Gray
-foreach ($portNum in 8080, 5173) {
+Write-Host "  Checking ports $BackendPort and $FrontendPort..." -ForegroundColor Gray
+foreach ($portNum in $BackendPort, $FrontendPort) {
     $conn = Get-NetTCPConnection -LocalPort $portNum -State Listen -ErrorAction SilentlyContinue
     if ($conn) {
         Write-Host "  Port $portNum is in use by PID $($conn.OwningProcess), freeing..." -ForegroundColor Yellow
@@ -68,7 +70,7 @@ if (-not (Test-Path $envFile)) {
         Copy-Item $envExample $envFile
         Write-Host "  Created backend/.env from .env.example" -ForegroundColor Green
     } else {
-        "PORT=8080" | Out-File -FilePath $envFile -Encoding utf8
+        "PORT=8081" | Out-File -FilePath $envFile -Encoding utf8
         "ADMIN_USER=admin" | Out-File -FilePath $envFile -Encoding utf8 -Append
         "ADMIN_PASS=admin123" | Out-File -FilePath $envFile -Encoding utf8 -Append
         "JWT_SECRET=iupdater-secret-key-change-in-production" | Out-File -FilePath $envFile -Encoding utf8 -Append
@@ -121,7 +123,7 @@ for ($i = 0; $i -lt 30; $i++) {
         exit 1
     }
     try {
-        $null = Invoke-WebRequest -Uri "http://localhost:8080/" -UseBasicParsing -ErrorAction Stop
+        $null = Invoke-WebRequest -Uri "http://localhost:$BackendPort/" -UseBasicParsing -ErrorAction Stop
         $backendReady = $true
         break
     } catch [System.Net.WebException] {
@@ -137,7 +139,7 @@ for ($i = 0; $i -lt 30; $i++) {
 }
 
 if ($backendReady) {
-    Write-Host "  Backend ready on http://localhost:8080" -ForegroundColor Green
+    Write-Host "  Backend ready on http://localhost:$BackendPort" -ForegroundColor Green
 } else {
     Write-Host "  Warning: Backend health check timed out" -ForegroundColor Yellow
 }
@@ -171,9 +173,9 @@ Write-Host "========================================" -ForegroundColor Green
 Write-Host "  Dev Environment is Running!" -ForegroundColor Green
 Write-Host "========================================" -ForegroundColor Green
 Write-Host ""
-Write-Host "  Frontend:  http://localhost:5173" -ForegroundColor White
-Write-Host "  Backend:   http://localhost:8080" -ForegroundColor White
-Write-Host "  API Proxy: /api -> http://localhost:8080" -ForegroundColor Gray
+Write-Host "  Frontend:  http://localhost:$FrontendPort" -ForegroundColor White
+Write-Host "  Backend:   http://localhost:$BackendPort" -ForegroundColor White
+Write-Host "  API Proxy: /api -> http://localhost:$BackendPort" -ForegroundColor Gray
 Write-Host ""
 Write-Host "  Default Login: admin / admin123" -ForegroundColor Yellow
 Write-Host ""

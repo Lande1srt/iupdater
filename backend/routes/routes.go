@@ -33,9 +33,18 @@ func SetupRoutes(r *gin.Engine) {
 		api.POST("/agent/report", handlers.AgentReport)
 
 		admin := api.Group("/admin")
-		admin.Use(middleware.AuthMiddleware())
+		// 统一鉴权：先试 X-API-Key / Bearer APIKey-xxx，再 fallback 旧 Bearer JWT
+		admin.Use(middleware.ApiKeyMiddleware())
 		{
-			// 存储配置档案管理（侧边栏存储管理）
+			// —— Admin APIKey 自身管理 ——
+			admin.GET("/api-keys", handlers.ListAPIKeys)
+			admin.POST("/api-keys", handlers.CreateAPIKey)
+			admin.PUT("/api-keys/:id", handlers.UpdateAPIKey)
+			admin.DELETE("/api-keys/:id", handlers.DeleteAPIKey)
+			admin.POST("/api-keys/:id/regenerate", handlers.RegenerateAPIKey) // 重新生成并返回明文（仅此一次）
+			admin.POST("/api-keys/:id/toggle", handlers.ToggleAPIKey)          // enable/disable
+
+			// —— 存储配置档案管理 ——
 			admin.GET("/storage-profiles", handlers.GetStorageProfiles)
 			admin.GET("/storage-profiles/:id", handlers.GetStorageProfile)
 			admin.POST("/storage-profiles", handlers.CreateStorageProfile)

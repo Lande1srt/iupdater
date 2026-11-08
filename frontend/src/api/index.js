@@ -154,3 +154,30 @@ export function controlAgent(id, command, configPatch) {
 export function clearAgentError(id) {
   return request.post(`/admin/agents/${id}/clear-error`)
 }
+
+// ============ Admin API Key 管理 ============
+// 注意：明文 key 只会在 create / regenerate 的响应里返回一次，
+// 数据库只存 SHA256 哈希，之后再也拿不到明文。
+export function listAPIKeys() {
+  return request.get('/admin/api-keys')
+}
+
+export function createAPIKey(data) {
+  return request.post('/admin/api-keys', data)
+}
+
+export function updateAPIKey(id, data) {
+  return request.put(`/admin/api-keys/${id}`, data)
+}
+
+export function deleteAPIKey(id) {
+  return request.delete(`/admin/api-keys/${id}`)
+}
+
+export function regenerateAPIKey(id) {
+  return request.post(`/admin/api-keys/${id}/regenerate`)
+}
+
+export function toggleAPIKey(id) {
+  return request.post(`/admin/api-keys/${id}/toggle`)
+}

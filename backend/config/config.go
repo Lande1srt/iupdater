@@ -21,7 +21,7 @@ var AppConfig *Config
 func LoadConfig() error {
 	_ = godotenv.Load()
 
-	port, _ := strconv.Atoi(getEnv("PORT", "8080"))
+	port, _ := strconv.Atoi(getEnv("PORT", "8081"))
 
 	AppConfig = &Config{
 		Port:       port,

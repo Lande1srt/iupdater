@@ -71,10 +71,13 @@ func Login(c *gin.Context) {
 	})
 }
 
-// GetLoginConfig 公开 endpoint，前端登录页调用判断是否需要显示 TOTP 输入框
+// GetLoginConfig 公开 endpoint，前端登录页调用判断是否需要显示 TOTP 输入框。
+// 同时作为 SeaStack 基座探测 iUpdater 是否存活的握手点。
 func GetLoginConfig(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
-		"totp_enabled": config.AppConfig.TOTPSecret != "",
+		"totp_enabled":         config.AppConfig.TOTPSecret != "",
+		"version":              "1.0.0",
+		"seastack_compatible":  true,
 	})
 }
 
